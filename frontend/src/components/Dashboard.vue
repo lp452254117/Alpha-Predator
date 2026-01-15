@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import AnalysisFlow from './AnalysisFlow.vue'
+import PortfolioManager from './PortfolioManager.vue'
 const props = defineProps<{
   apiStatus: 'connecting' | 'connected' | 'error'
   currentLlmProvider?: string
@@ -18,7 +19,7 @@ const llmProviderName = computed(() => {
 })
 
 // 状态
-const activeTab = ref<'alpha' | 'diagnose'>('alpha')
+const activeTab = ref<'alpha' | 'diagnose' | 'portfolio'>('alpha')
 const isAnalyzing = ref(false)
 const isDiagnosing = ref(false)
 const stockCode = ref('')
@@ -299,6 +300,15 @@ function formatMarkdown(text: string): string {
             <span class="nav-text">Deep Dive</span>
             <span class="nav-desc">个股深度诊疗</span>
           </button>
+          <button 
+            class="nav-item"
+            :class="{ active: activeTab === 'portfolio' }"
+            @click="activeTab = 'portfolio'"
+          >
+            <span class="nav-icon">💼</span>
+            <span class="nav-text">持仓管理</span>
+            <span class="nav-desc">管理我的持仓</span>
+          </button>
         </nav>
       </div>
       
@@ -411,6 +421,17 @@ function formatMarkdown(text: string): string {
           
           <div class="report-content" v-html="formatMarkdown(diagnoseResult.content)"></div>
         </div>
+      </div>
+
+      <!-- 持仓管理 -->
+      <div v-if="activeTab === 'portfolio'" class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">💼 持仓管理</h2>
+            <p class="panel-subtitle">记录和管理您的持仓，支持实时盈亏分析</p>
+          </div>
+        </div>
+        <PortfolioManager />
       </div>
     </main>
     

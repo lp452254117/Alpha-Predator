@@ -5,7 +5,7 @@
  * 步骤2: 用户选择板块
  * 步骤3: 推荐具体股票
  */
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import SectorCard from './SectorCard.vue'
 import StockRecommendation from './StockRecommendation.vue'
 
@@ -61,6 +61,28 @@ const sectorAnalysis = ref<SectorAnalysis | null>(null)
 const selectedSectors = ref<Set<string>>(new Set())
 const stockRecommendations = ref<StockRecommendations | null>(null)
 
+// 风险偏好
+const riskPreference = ref<'aggressive' | 'balanced' | 'conservative'>('balanced')
+const riskOptions = [
+  { value: 'aggressive', label: '🔥 激进型', desc: '高风险高收益，追涨停' },
+  { value: 'balanced', label: '⚖️ 平衡型', desc: '兼顾成长与安全' },
+  { value: 'conservative', label: '🛡️ 保守型', desc: '蓝筹高股息' },
+]
+
+// 启动时加载风险偏好
+onMounted(() => {
+  const saved = localStorage.getItem('riskPreference')
+  if (saved && ['aggressive', 'balanced', 'conservative'].includes(saved)) {
+    riskPreference.value = saved as any
+  }
+})
+
+// 保存风险偏好
+function setRiskPreference(value: 'aggressive' | 'balanced' | 'conservative') {
+  riskPreference.value = value
+  localStorage.setItem('riskPreference', value)
+}
+
 // 计算属性
 const hasSelectedSectors = computed(() => selectedSectors.value.size > 0)
 
@@ -111,7 +133,8 @@ async function recommendStocks() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        sectors: Array.from(selectedSectors.value)
+        sectors: Array.from(selectedSectors.value),
+        risk_preference: riskPreference.value
       })
     })
     const data = await response.json()
@@ -188,6 +211,24 @@ function getDirectionClass(direction: string) {
         <div class="start-icon">🎯</div>
         <h2>智能策略分析</h2>
         <p>分析当前市场热门板块，智能推荐值得关注的投资方向</p>
+        
+        <!-- 风险偏好选择 -->
+        <div class="risk-preference-section">
+          <div class="risk-label">选择投资风格：</div>
+          <div class="risk-options">
+            <button
+              v-for="option in riskOptions"
+              :key="option.value"
+              class="risk-option"
+              :class="{ active: riskPreference === option.value }"
+              @click="setRiskPreference(option.value as any)"
+            >
+              <span class="risk-option-label">{{ option.label }}</span>
+              <span class="risk-option-desc">{{ option.desc }}</span>
+            </button>
+          </div>
+        </div>
+        
         <button 
           class="btn btn-primary btn-large"
           @click="analyzeSectors"
@@ -421,8 +462,62 @@ function getDirectionClass(direction: string) {
 
 .start-section p {
   color: var(--text-secondary, #888);
-  margin-bottom: 32px;
+  margin-bottom: 24px;
   max-width: 400px;
+}
+
+/* 风险偏好选择器 */
+.risk-preference-section {
+  margin-bottom: 32px;
+  text-align: center;
+}
+
+.risk-label {
+  font-size: 0.9rem;
+  color: var(--text-secondary, #888);
+  margin-bottom: 12px;
+}
+
+.risk-options {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.risk-option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 16px 20px;
+  background: var(--bg-tertiary, #2a2a3e);
+  border: 2px solid transparent;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  min-width: 140px;
+}
+
+.risk-option:hover {
+  background: var(--bg-hover, #333);
+  border-color: rgba(139, 92, 246, 0.3);
+}
+
+.risk-option.active {
+  background: rgba(139, 92, 246, 0.2);
+  border-color: var(--primary-color, #8b5cf6);
+}
+
+.risk-option-label {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary, #fff);
+  margin-bottom: 4px;
+}
+
+.risk-option-desc {
+  font-size: 0.75rem;
+  color: var(--text-secondary, #888);
 }
 
 /* 市场总结 */

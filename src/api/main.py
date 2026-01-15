@@ -215,27 +215,62 @@ _runtime_api_keys: dict[str, str] = {}
 async def configure_api_key(request: APIKeyConfigRequest):
     """配置 API Key
     
-    运行时配置 API Key，无需修改 .env 文件。
-    重启后失效。
+    运行时配置 API Key，同时持久化到 .env 文件。
+    重启后仍然有效。
     """
     import os
+    from pathlib import Path
     
     provider = request.provider.lower()
     
-    # 设置环境变量（运行时生效）
-    if provider == "google":
-        os.environ["GOOGLE_API_KEY"] = request.api_key
-        _runtime_api_keys["google"] = request.api_key
-    elif provider == "openai":
-        os.environ["OPENAI_API_KEY"] = request.api_key
-        _runtime_api_keys["openai"] = request.api_key
-    elif provider == "qwen":
-        os.environ["QWEN_API_KEY"] = request.api_key
-        _runtime_api_keys["qwen"] = request.api_key
-    else:
+    # 环境变量名称映射
+    env_key_map = {
+        "google": "GOOGLE_API_KEY",
+        "openai": "OPENAI_API_KEY",
+        "qwen": "QWEN_API_KEY",
+    }
+    
+    if provider not in env_key_map:
         raise HTTPException(status_code=400, detail=f"不支持的提供商: {provider}")
     
-    # 重置配置和 LLM 实例，并切换到新配置的提供商
+    env_key = env_key_map[provider]
+    
+    # 1. 设置环境变量（运行时生效）
+    os.environ[env_key] = request.api_key
+    _runtime_api_keys[provider] = request.api_key
+    
+    # 2. 持久化到 .env 文件
+    env_file = Path(".env")
+    env_lines = []
+    key_updated = False
+    
+    # 读取现有 .env 文件
+    if env_file.exists():
+        with open(env_file, "r", encoding="utf-8") as f:
+            for line in f:
+                # 跳过注释和空行
+                if line.startswith("#") or not line.strip():
+                    env_lines.append(line)
+                    continue
+                
+                # 检查是否是目标 key
+                if line.startswith(f"{env_key}="):
+                    env_lines.append(f"{env_key}={request.api_key}\n")
+                    key_updated = True
+                else:
+                    env_lines.append(line)
+    
+    # 如果 key 不存在，添加到末尾
+    if not key_updated:
+        env_lines.append(f"{env_key}={request.api_key}\n")
+    
+    # 写回文件
+    with open(env_file, "w", encoding="utf-8") as f:
+        f.writelines(env_lines)
+    
+    logger.info(f"API Key 已保存到 .env 文件: {env_key}")
+    
+    # 3. 重置配置和 LLM 实例，并切换到新配置的提供商
     from src.config import reload_settings, LLMProvider
     from src.ai.llm.factory import switch_llm_provider
     
@@ -249,12 +284,13 @@ async def configure_api_key(request: APIKeyConfigRequest):
     app.state.alpha_predator = AlphaPredator()
     app.state.deep_dive = DeepDiveDiagnostic()
     
-    logger.info(f"已配置 {provider} API Key")
+    logger.info(f"已配置 {provider} API Key 并持久化保存")
     
     return {
         "success": True,
         "provider": provider,
-        "message": f"{provider.upper()} API Key 已配置成功",
+        "message": f"{provider.upper()} API Key 已配置并保存",
+        "persisted": True,
     }
 
 
@@ -351,6 +387,7 @@ async def run_morning_pipeline(send_notification: bool = False):
 class SectorRecommendRequest(BaseModel):
     """股票推荐请求"""
     sectors: list[str] = Field(..., description="选中的板块列表")
+    risk_preference: str = Field(default="balanced", description="风险偏好: aggressive, balanced, conservative")
 
 
 @app.get("/api/analyze/sectors", tags=["分步分析"])
@@ -374,13 +411,22 @@ async def recommend_stocks(request: SectorRecommendRequest):
     """第二步：根据选定板块推荐股票
     
     用户选择感兴趣的板块后，推荐该板块内值得买入的股票。
+    支持根据用户风险偏好调整推荐策略。
     """
     if not request.sectors:
         raise HTTPException(status_code=400, detail="请至少选择一个板块")
     
+    # 验证风险偏好
+    valid_risk = ["aggressive", "balanced", "conservative"]
+    if request.risk_preference not in valid_risk:
+        request.risk_preference = "balanced"
+    
     try:
         predator: AlphaPredator = app.state.alpha_predator
-        result = await predator.recommend_stocks(request.sectors)
+        result = await predator.recommend_stocks(
+            request.sectors, 
+            risk_preference=request.risk_preference
+        )
         return result
         
     except Exception as e:
@@ -453,3 +499,184 @@ async def global_exception_handler(request, exc):
         status_code=500,
         content={"error": "Internal Server Error", "detail": str(exc)},
     )
+
+
+# ==================== 用户偏好管理 ====================
+
+class UserPreferencesRequest(BaseModel):
+    """用户偏好请求"""
+    risk_preference: str = Field(..., description="风险偏好: aggressive, balanced, conservative")
+
+
+# 用户偏好存储（内存 + 文件持久化）
+_user_preferences: dict = {}
+_preferences_file = "user_preferences.json"
+
+
+def _load_preferences():
+    """加载用户偏好"""
+    import json
+    from pathlib import Path
+    
+    global _user_preferences
+    pref_path = Path(_preferences_file)
+    if pref_path.exists():
+        try:
+            with open(pref_path, "r", encoding="utf-8") as f:
+                _user_preferences = json.load(f)
+        except Exception as e:
+            logger.warning(f"加载用户偏好失败: {e}")
+            _user_preferences = {}
+
+
+def _save_preferences():
+    """保存用户偏好"""
+    import json
+    
+    try:
+        with open(_preferences_file, "w", encoding="utf-8") as f:
+            json.dump(_user_preferences, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.error(f"保存用户偏好失败: {e}")
+
+
+# 启动时加载偏好
+_load_preferences()
+
+
+@app.get("/api/user/preferences", tags=["用户"])
+async def get_user_preferences():
+    """获取用户偏好"""
+    return {
+        "success": True,
+        "preferences": _user_preferences,
+    }
+
+
+@app.post("/api/user/preferences", tags=["用户"])
+async def set_user_preferences(request: UserPreferencesRequest):
+    """设置用户偏好"""
+    valid_risk = ["aggressive", "balanced", "conservative"]
+    if request.risk_preference not in valid_risk:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"无效的风险偏好，可选: {valid_risk}"
+        )
+    
+    _user_preferences["risk_preference"] = request.risk_preference
+    _save_preferences()
+    
+    return {
+        "success": True,
+        "preferences": _user_preferences,
+        "message": "偏好已保存",
+    }
+
+
+# ==================== 持仓管理 ====================
+
+class PositionItem(BaseModel):
+    """持仓项"""
+    ts_code: str = Field(..., description="股票代码")
+    name: str = Field("", description="股票名称")
+    quantity: int = Field(..., description="持有数量（必须是100的整数倍）")
+    cost_price: float = Field(..., description="成本价")
+
+
+class PortfolioRequest(BaseModel):
+    """持仓请求"""
+    total_capital: float = Field(..., description="总投入资金")
+    positions: list[PositionItem] = Field(default=[], description="持仓列表")
+
+
+# 持仓数据（仅内存存储，前端负责持久化到 localStorage）
+_portfolio: dict = {
+    "total_capital": 0,
+    "positions": [],
+}
+
+
+@app.get("/api/user/portfolio", tags=["用户"])
+async def get_portfolio():
+    """获取持仓（服务端缓存）"""
+    return {
+        "success": True,
+        "portfolio": _portfolio,
+    }
+
+
+@app.post("/api/user/portfolio", tags=["用户"])
+async def update_portfolio(request: PortfolioRequest):
+    """更新持仓"""
+    global _portfolio
+    
+    # 验证持仓数量是 100 的整数倍
+    for pos in request.positions:
+        if pos.quantity % 100 != 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"持仓数量必须是100的整数倍: {pos.ts_code}"
+            )
+    
+    _portfolio = {
+        "total_capital": request.total_capital,
+        "positions": [p.model_dump() for p in request.positions],
+    }
+    
+    # 计算仓位占比
+    for pos in _portfolio["positions"]:
+        market_value = pos["quantity"] * pos["cost_price"]
+        pos["market_value"] = market_value
+        pos["weight"] = market_value / request.total_capital if request.total_capital > 0 else 0
+    
+    logger.info(f"更新持仓: {len(request.positions)} 只股票, 总资金 {request.total_capital}")
+    
+    return {
+        "success": True,
+        "portfolio": _portfolio,
+    }
+
+
+@app.get("/api/user/portfolio/analysis", tags=["用户"])
+async def analyze_portfolio():
+    """分析持仓"""
+    if not _portfolio["positions"]:
+        return {
+            "success": False,
+            "error": "暂无持仓数据",
+        }
+    
+    # 获取持仓股票的实时行情
+    from src.data.sources.factory import UnifiedDataSource
+    data_source = UnifiedDataSource()
+    
+    analysis = []
+    total_profit = 0
+    
+    for pos in _portfolio["positions"]:
+        ts_code = pos["ts_code"]
+        quote = data_source.get_realtime_quote(ts_code)
+        
+        if quote:
+            current_price = quote.get("price", pos["cost_price"])
+            profit = (current_price - pos["cost_price"]) * pos["quantity"]
+            profit_pct = (current_price / pos["cost_price"] - 1) * 100 if pos["cost_price"] > 0 else 0
+            
+            analysis.append({
+                "ts_code": ts_code,
+                "name": pos.get("name", quote.get("name", "")),
+                "quantity": pos["quantity"],
+                "cost_price": pos["cost_price"],
+                "current_price": current_price,
+                "profit": profit,
+                "profit_pct": profit_pct,
+                "weight": pos.get("weight", 0),
+            })
+            total_profit += profit
+    
+    return {
+        "success": True,
+        "analysis": analysis,
+        "total_profit": total_profit,
+        "total_capital": _portfolio["total_capital"],
+    }

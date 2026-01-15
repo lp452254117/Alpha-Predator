@@ -513,11 +513,12 @@ Shibor 利率:
                 "sectors": [],
             }
     
-    async def recommend_stocks(self, selected_sectors: list[str]) -> dict:
+    async def recommend_stocks(self, selected_sectors: list[str], risk_preference: str = "balanced") -> dict:
         """根据选定板块推荐股票
         
         Args:
             selected_sectors: 用户选择的板块列表
+            risk_preference: 风险偏好 (aggressive/balanced/conservative)
             
         Returns:
             结构化的股票推荐结果
@@ -528,7 +529,7 @@ Shibor 利率:
         self._ensure_initialized()
         
         trade_date = self.data_source.get_today_str()
-        logger.info(f"开始股票推荐: {trade_date}, 板块: {selected_sectors}")
+        logger.info(f"开始股票推荐: {trade_date}, 板块: {selected_sectors}, 风险偏好: {risk_preference}")
         
         # 采集股票数据
         stock_quotes = "暂无数据"
@@ -580,6 +581,14 @@ Shibor 利率:
         except Exception as e:
             logger.error(f"采集股票数据失败: {e}")
         
+        # 风险偏好提示
+        risk_prompts = {
+            "aggressive": "【激进型】用户偏好高风险高收益，可推荐题材股、涨停板股、短线博弈机会，仓位可偏高。",
+            "balanced": "【平衡型】用户风险偏好适中，推荐兼顾成长性与安全边际的标的，仓位适中。",
+            "conservative": "【保守型】用户偏好低风险稳健收益，推荐蓝筹股、高股息标的，仓位建议偏低。",
+        }
+        risk_hint = risk_prompts.get(risk_preference, risk_prompts["balanced"])
+        
         # 渲染 Prompt
         prompt = render_prompt(
             STOCK_RECOMMENDATION_TEMPLATE,
@@ -589,6 +598,9 @@ Shibor 利率:
             stock_money_flow=stock_money_flow,
             stock_technicals=stock_technicals,
         )
+        
+        # 追加风险偏好
+        prompt = f"【用户风险偏好】\n{risk_hint}\n\n" + prompt
         
         # 在 prompt 中追加板块成分股信息
         if sector_stock_list != "暂无数据":

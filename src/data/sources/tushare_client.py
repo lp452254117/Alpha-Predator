@@ -32,6 +32,12 @@ class TushareClient:
         if not self.token:
             raise ValueError("Tushare Token 未配置，请在 .env 中设置 TUSHARE_TOKEN")
         
+        # 配置代理 (User provided)
+        import os
+        proxy_url = "http://user:liuhkcxjvasrdg@8.140.4.230:8888"
+        os.environ["HTTP_PROXY"] = proxy_url
+        os.environ["HTTPS_PROXY"] = proxy_url
+        
         # 初始化 Tushare Pro API
         ts.set_token(self.token)
         self.pro = ts.pro_api()

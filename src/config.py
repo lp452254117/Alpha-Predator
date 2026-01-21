@@ -23,7 +23,12 @@ class TushareSettings(BaseSettings):
     """Tushare 数据源配置"""
     token: SecretStr = Field(default=SecretStr(""), description="Tushare Pro API Token")
     
-    model_config = SettingsConfigDict(env_prefix="TUSHARE_")
+    model_config = SettingsConfigDict(
+        env_prefix="TUSHARE_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore"
+    )
 
 
 class GoogleLLMSettings(BaseSettings):
@@ -95,6 +100,13 @@ class NotificationSettings(BaseSettings):
     smtp_user: Optional[str] = Field(default=None, description="SMTP 用户名")
     smtp_password: Optional[SecretStr] = Field(default=None, description="SMTP 密码")
     smtp_from: Optional[str] = Field(default=None, description="发件人地址")
+
+    model_config = SettingsConfigDict(
+        env_prefix="NOTIFICATION_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore"
+    )
 
 
 class Settings(BaseSettings):

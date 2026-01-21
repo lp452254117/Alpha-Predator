@@ -55,7 +55,7 @@ npm install
 npm run dev
 ```
 
-访问 `http://localhost:5173` 即可开始使用。
+访问 `http://localhost:5175` 即可开始使用。
 
 ## 架构思路
 

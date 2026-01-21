@@ -29,7 +29,7 @@ class MACDResult:
         if len(self.macd) < 2:
             return False
         # 昨日 DIF < DEA，今日 DIF > DEA
-        return (self.macd.iloc[-2] < self.signal.iloc[-2] and 
+        return bool(self.macd.iloc[-2] < self.signal.iloc[-2] and 
                 self.macd.iloc[-1] > self.signal.iloc[-1])
     
     @property
@@ -37,20 +37,20 @@ class MACDResult:
         """是否出现死叉"""
         if len(self.macd) < 2:
             return False
-        return (self.macd.iloc[-2] > self.signal.iloc[-2] and 
+        return bool(self.macd.iloc[-2] > self.signal.iloc[-2] and 
                 self.macd.iloc[-1] < self.signal.iloc[-1])
     
     @property
     def is_above_zero(self) -> bool:
         """MACD 是否在零轴上方"""
-        return self.macd.iloc[-1] > 0
+        return bool(self.macd.iloc[-1] > 0)
     
     @property
     def histogram_expanding(self) -> bool:
         """红柱是否放大"""
         if len(self.histogram) < 2:
             return False
-        return (self.histogram.iloc[-1] > 0 and 
+        return bool(self.histogram.iloc[-1] > 0 and 
                 self.histogram.iloc[-1] > self.histogram.iloc[-2])
 
 
@@ -66,7 +66,7 @@ class KDJResult:
         """是否出现金叉"""
         if len(self.k) < 2:
             return False
-        return (self.k.iloc[-2] < self.d.iloc[-2] and 
+        return bool(self.k.iloc[-2] < self.d.iloc[-2] and 
                 self.k.iloc[-1] > self.d.iloc[-1])
     
     @property
@@ -74,23 +74,23 @@ class KDJResult:
         """是否出现死叉"""
         if len(self.k) < 2:
             return False
-        return (self.k.iloc[-2] > self.d.iloc[-2] and 
+        return bool(self.k.iloc[-2] > self.d.iloc[-2] and 
                 self.k.iloc[-1] < self.d.iloc[-1])
     
     @property
     def is_oversold(self) -> bool:
         """是否超卖（J < 20）"""
-        return self.j.iloc[-1] < 20
+        return bool(self.j.iloc[-1] < 20)
     
     @property
     def is_overbought(self) -> bool:
         """是否超买（J > 80）"""
-        return self.j.iloc[-1] > 80
+        return bool(self.j.iloc[-1] > 80)
     
     @property
     def is_low_golden_cross(self) -> bool:
         """是否低位金叉（J < 50 时金叉）"""
-        return self.is_golden_cross and self.j.iloc[-1] < 50
+        return bool(self.is_golden_cross and self.j.iloc[-1] < 50)
 
 
 @dataclass
@@ -131,12 +131,16 @@ class TechnicalIndicators:
     
     def _validate_columns(self):
         """验证必要的列是否存在"""
+        # 统一转为小写
+        self.df.columns = self.df.columns.str.lower()
+        
+        # 兼容 vol -> volume
+        if "vol" in self.df.columns and "volume" not in self.df.columns:
+            self.df = self.df.rename(columns={"vol": "volume"})
+            
         required = ["open", "high", "low", "close", "volume"]
-        # 支持大写列名
-        if all(col.upper() in [c.upper() for c in self.df.columns] for col in required):
-            # 统一转为小写
-            self.df.columns = self.df.columns.str.lower()
         missing = [col for col in required if col not in self.df.columns]
+        
         if missing:
             raise ValueError(f"缺少必要列: {missing}")
     

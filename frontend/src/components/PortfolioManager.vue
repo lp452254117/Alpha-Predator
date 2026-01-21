@@ -4,6 +4,7 @@
  * 支持添加、修改、删除持仓，自动保存到 localStorage
  */
 import { ref, computed, onMounted, watch } from 'vue'
+import { marked } from 'marked'
 
 interface Position {
   ts_code: string
@@ -271,7 +272,7 @@ async function diagnosePortfolio() {
     const data = await response.json()
     
     if (data.success) {
-      diagnosisResult.value = data.diagnosis
+      diagnosisResult.value = await marked.parse(data.diagnosis)
     } else {
       alert('诊断失败: ' + (data.error || '未知错误'))
     }
@@ -797,6 +798,82 @@ async function diagnosePortfolio() {
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* 诊断报告样式 */
+.diagnosis-section {
+  background: var(--bg-secondary, #1e1e2e);
+  border-radius: 12px;
+  padding: 20px;
+  margin-top: 20px;
+  border: 1px solid var(--border-color, #333);
+}
+
+.diagnosis-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--border-color, #333);
+  padding-bottom: 10px;
+}
+
+.diagnosis-content {
+  line-height: 1.6;
+  color: var(--text-primary, #e0e0e0);
+}
+
+.diagnosis-content :deep(h1),
+.diagnosis-content :deep(h2),
+.diagnosis-content :deep(h3),
+.diagnosis-content :deep(h4) {
+  margin-top: 1.5em;
+  margin-bottom: 0.8em;
+  color: var(--text-primary, #fff);
+}
+
+.diagnosis-content :deep(table) {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+  background: var(--bg-tertiary, #2a2a3e);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.diagnosis-content :deep(th),
+.diagnosis-content :deep(td) {
+  padding: 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--border-color, #444);
+}
+
+.diagnosis-content :deep(th) {
+  background: rgba(255, 255, 255, 0.05);
+  font-weight: 600;
+  color: var(--text-secondary, #aaa);
+}
+
+.diagnosis-content :deep(tr:last-child td) {
+  border-bottom: none;
+}
+
+.diagnosis-content :deep(ul),
+.diagnosis-content :deep(ol) {
+  padding-left: 20px;
+  margin: 1em 0;
+}
+
+.diagnosis-content :deep(li) {
+  margin-bottom: 0.5em;
+}
+
+.diagnosis-content :deep(p) {
+  margin-bottom: 1em;
+}
+
+.diagnosis-content :deep(strong) {
+  color: var(--primary-color, #8b5cf6);
 }
 
 /* 诊断结果 */

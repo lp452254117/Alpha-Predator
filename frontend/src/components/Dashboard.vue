@@ -258,6 +258,8 @@ async function runDiagnose() {
   }
 }
 
+// @ts-ignore
+import html2pdf from 'html2pdf.js'
 // 格式化 Markdown（使用 marked 库正确渲染表格）
 import { marked } from 'marked'
 
@@ -267,13 +269,87 @@ marked.setOptions({
   gfm: true,     // 支持 GitHub 风格 Markdown
 })
 
+
+const isExporting = ref(false)
+
+async function exportToPdf() {
+  if (!diagnoseResult.value) return
+  
+  isExporting.value = true
+  try {
+    const element = document.querySelector('.diagnose-result')
+    if (!element) return
+
+    const opt = {
+      margin:       10,
+      filename:     `${diagnoseResult.value.stock.name}_${diagnoseResult.value.stock.ts_code}_诊断报告.pdf`,
+      image:        { type: 'jpeg', quality: 0.98 },
+      html2canvas:  { scale: 2, useCORS: true },
+      jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+    }
+
+    // @ts-ignore
+    await html2pdf().from(element).set(opt).save()
+  } catch (e) {
+    console.error('导出失败', e)
+    showError('error', '导出失败', '生成 PDF 时发生错误')
+  } finally {
+    isExporting.value = false
+  }
+}
+
+// 格式化大数字
+function formatNumberWithUnit(numStr: string): string {
+  // 忽略 6 位纯整数 (可能是股票代码)
+  if (/^\d{6}$/.test(numStr) && !numStr.includes('.')) {
+    return numStr
+  }
+  
+  const num = parseFloat(numStr)
+  if (isNaN(num)) return numStr
+  
+  if (num >= 100000000) {
+    return (num / 100000000).toFixed(2).replace(/\.00$/, '') + ' 亿'
+  }
+  if (num >= 10000) {
+    return (num / 10000).toFixed(2).replace(/\.00$/, '') + ' 万'
+  }
+  return numStr
+}
+
+// 预处理文本中的数字
+function formatTextNumbers(text: string): string {
+  if (!text) return ''
+  // 匹配 5位以上数字
+  return text.replace(/\b(\d+(\.\d+)?)\b/g, (match) => {
+    const val = parseFloat(match)
+    // 忽略年份 (1990-2030)
+    if (!match.includes('.') && match.length === 4 && val >= 1990 && val <= 2030) {
+      return match
+    }
+    // 忽略太小的数
+    if (val < 10000) return match
+    
+    return formatNumberWithUnit(match)
+  })
+}
+
 function formatMarkdown(text: string): string {
   if (!text) return ''
+  
+  // 检查是否可能导致内存溢出 (极大文本)
+  if (text.length > 1000000) {
+     return '文本过长，无法渲染'
+  }
+
+  // 1. 预处理大数字
+  const formattedText = formatTextNumbers(text)
+  
   try {
-    return marked(text) as string
+    return marked(formattedText) as string
   } catch (e) {
     // 降级到简单替换
-    return text
+    return formattedText
       .replace(/^### (.*$)/gm, '<h3>$1</h3>')
       .replace(/^## (.*$)/gm, '<h2>$1</h2>')
       .replace(/^# (.*$)/gm, '<h1>$1</h1>')
@@ -414,6 +490,16 @@ function formatMarkdown(text: string): string {
           >
             <span v-if="isDiagnosing" class="loading-spinner"></span>
             {{ isDiagnosing ? '诊疗中...' : '开始诊疗' }}
+          </button>
+          <button 
+            class="btn btn-secondary"
+            @click="exportToPdf"
+            :disabled="!diagnoseResult || isExporting"
+            v-if="diagnoseResult"
+            title="导出为 PDF 报告"
+          >
+            <span v-if="isExporting" class="loading-spinner-small" style="margin-right: 4px; border-color: currentColor; border-top-color: transparent;"></span>
+            {{ isExporting ? '导出中...' : '导出报告' }}
           </button>
         </div>
         
@@ -1200,5 +1286,41 @@ function formatMarkdown(text: string): string {
   .sidebar {
     display: none;
   }
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 20px;
+  border-radius: var(--radius-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: none;
+  font-size: 14px;
+}
+
+.btn-primary {
+  background: var(--primary-gradient);
+  color: white;
+}
+
+.btn-secondary {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  margin-left: 12px;
+}
+
+.btn-secondary:hover {
+  background: var(--bg-hover);
+  border-color: var(--primary-color);
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
 }
 </style>

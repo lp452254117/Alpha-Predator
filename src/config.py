@@ -31,7 +31,12 @@ class GoogleLLMSettings(BaseSettings):
     api_key: SecretStr = Field(default=SecretStr(""), description="Google API Key")
     model: str = Field(default="gemini-2.0-flash", description="模型名称")
     
-    model_config = SettingsConfigDict(env_prefix="GOOGLE_")
+    model_config = SettingsConfigDict(
+        env_prefix="GOOGLE_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore"
+    )
 
 
 class OpenAILLMSettings(BaseSettings):
@@ -40,7 +45,12 @@ class OpenAILLMSettings(BaseSettings):
     base_url: str = Field(default="https://api.openai.com/v1", description="API Base URL")
     model: str = Field(default="gpt-4o", description="模型名称")
     
-    model_config = SettingsConfigDict(env_prefix="OPENAI_")
+    model_config = SettingsConfigDict(
+        env_prefix="OPENAI_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore"
+    )
 
 
 class CustomLLMSettings(BaseSettings):
@@ -49,7 +59,12 @@ class CustomLLMSettings(BaseSettings):
     base_url: str = Field(default="http://localhost:8000/v1", description="API Base URL")
     model: str = Field(default="", description="模型名称")
     
-    model_config = SettingsConfigDict(env_prefix="CUSTOM_LLM_")
+    model_config = SettingsConfigDict(
+        env_prefix="CUSTOM_LLM_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore"
+    )
 
 
 class QwenLLMSettings(BaseSettings):
@@ -57,7 +72,12 @@ class QwenLLMSettings(BaseSettings):
     api_key: SecretStr = Field(default=SecretStr(""), description="DashScope API Key")
     model: str = Field(default="qwen-turbo", description="模型名称 (qwen-turbo/qwen-plus/qwen-max)")
     
-    model_config = SettingsConfigDict(env_prefix="QWEN_")
+    model_config = SettingsConfigDict(
+        env_prefix="QWEN_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore"
+    )
 
 
 class NotificationSettings(BaseSettings):

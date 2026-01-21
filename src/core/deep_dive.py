@@ -147,7 +147,11 @@ class DeepDiveDiagnostic:
                 start_date=start_date,
                 end_date=end_date,
             )
-            
+
+            # AkShare 模式 - 始终初始化因为它能获取个股新闻
+            from src.data.sources.ths_client import THSClient
+            ths = THSClient()
+
             # 基本面数据
             if self.data_source.is_tushare:
                 # Tushare 模式
@@ -156,10 +160,6 @@ class DeepDiveDiagnostic:
                     trade_date=end_date,
                 )
             elif self.data_source.is_akshare:
-                # AkShare 模式 - 获取更丰富的数据
-                from src.data.sources.ths_client import THSClient
-                ths = THSClient()
-                
                 stock_code = ts_code.split(".")[0]
                 market = "sz" if ts_code.endswith(".SZ") else "sh"
                 
@@ -170,15 +170,7 @@ class DeepDiveDiagnostic:
                         data["financial_abstract"] = financial
                 except Exception as e:
                     logger.warning(f"获取财务摘要失败: {e}")
-                
-                # 获取个股新闻
-                try:
-                    news = ths.get_stock_news(ts_code, limit=5)
-                    if news:
-                        data["news"] = news
-                except Exception as e:
-                    logger.warning(f"获取个股新闻失败: {e}")
-                
+
                 # 获取资金流向
                 try:
                     flow = ths.ak.stock_individual_fund_flow(stock=stock_code, market=market)
@@ -226,7 +218,15 @@ class DeepDiveDiagnostic:
                             data["industry_info"] = matched.iloc[0].to_dict()
                 except Exception as e:
                     logger.warning(f"获取行业信息失败: {e}")
-            
+
+            # 获取个股新闻(因为Tushare不具备获取个股西新闻能力.所以始终由Akshare获取)
+            try:
+                news = ths.get_stock_news(ts_code, limit=5)
+                if news:
+                    data["news"] = news
+            except Exception as e:
+                logger.warning(f"获取个股新闻失败: {e}")
+
             # 技术指标分析
             if data["daily"] is not None and not data["daily"].empty:
                 # 按日期排序（升序）
@@ -395,7 +395,8 @@ class DeepDiveDiagnostic:
         
         # 采集数据
         data = await self.collect_stock_data(ts_code)
-        
+        logger.info("采集的数据")
+        logger.info(data)
         # 格式化数据
         fundamental = self.format_fundamental_data(data)
         technical = self.format_technical_data(data)

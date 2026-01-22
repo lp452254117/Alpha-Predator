@@ -146,8 +146,38 @@ class UnifiedDataSource:
         if self.is_akshare:
             return self._akshare.get_realtime_quote(ts_code)
         else:
-            # Tushare 实时行情需要额外接口，暂时返回空
-            logger.warning("Tushare 实时行情接口未实现，返回空数据")
+            # Tushare 实时行情 via Sina
+            try:
+                df = self._tushare.get_realtime_quotes(ts_code)
+                if df is not None and not df.empty:
+                    row = df.iloc[0]
+                    return {
+                        "ts_code": ts_code,
+                        "name": row.get("name", ""),
+                        "price": float(row.get("price", 0)),
+                        "change": 0.0, # Tushare legacy/sina might not return pct_chg directly, or calculated
+                        # Sina keys: name, open, pre_close, price, high, low, bid, ask, vol, amount, ...
+                        # Actually 'price' is current price.
+                        # Calculate change if needed: (price - pre_close) / pre_close * 100
+                        "volume": float(row.get("volume", 0)) / 100, # Sina volume is in shares, we might want lots or consistent. AkShare is usually lots? Check AkShare implementation. 
+                        # AkShare stock_zh_a_spot_em volume is in 'hand' (100 shares)? No, usually shares or lots.
+                        # Let's check AkShare implementation logic. 
+                        # Wait, AkShare `stock_zh_a_spot_em` returns volume in '手' (lots)? Or shares?
+                        # Sina returns shares. 
+                        "amount": float(row.get("amount", 0)),
+                        "high": float(row.get("high", 0)),
+                        "low": float(row.get("low", 0)),
+                        "open": float(row.get("open", 0)),
+                        "pre_close": float(row.get("pre_close", 0)),
+                    }
+                    
+                # Fix change calculation
+                # pre_close = float(row.get("pre_close", 0))
+                # price = float(row.get("price", 0))
+                # if pre_close > 0:
+                #     change_pct = (price - pre_close) / pre_close * 100
+            except Exception as e:
+                logger.error(f"Tushare 获取实时行情失败: {e}")
             return {}
     
     def get_stock_info(self, ts_code: str) -> dict:

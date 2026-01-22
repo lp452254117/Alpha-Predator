@@ -837,6 +837,10 @@ async def diagnose_portfolio(request: PortfolioRequest):
             stock_info = await deep_dive.get_stock_info(ts_code)
             stock_data = await deep_dive.collect_stock_data(ts_code)
             
+            # 获取实时行情以计算盈亏
+            quote = deep_dive.data_source.get_realtime_quote(ts_code)
+            current_price = quote.get("price", 0) if quote else 0
+            
             fundamental = deep_dive.format_fundamental_data(stock_data)
             technical = deep_dive.format_technical_data(stock_data)
             
@@ -845,6 +849,7 @@ async def diagnose_portfolio(request: PortfolioRequest):
                 "name": stock_info.name if stock_info else pos.name,
                 "quantity": pos.quantity,
                 "cost_price": pos.cost_price,
+                "current_price": current_price,
                 "fundamental": fundamental,
                 "technical": technical,
             })

@@ -348,6 +348,28 @@ class TushareClient:
             logger.error(f"获取业绩预告失败: {e}")
             raise
 
+    def get_realtime_quotes(self, ts_code: str) -> pd.DataFrame:
+        """获取实时行情 (使用 Tushare 旧版接口/Sina源)
+        
+        Args:
+            ts_code: 股票代码 (e.g. 000001.SZ)
+            
+        Returns:
+            实时行情 DataFrame
+        """
+        try:
+            # Tushare get_realtime_quotes needs pure code usually, but let's check.
+            # actually ts.get_realtime_quotes handles list of codes.
+            # It expects code string/list. 
+            # If we pass "000001.SZ", does it work? 
+            # Usually strict numbers like "000001".
+            code = ts_code.split('.')[0]
+            df = ts.get_realtime_quotes(code)
+            return df
+        except Exception as e:
+            logger.error(f"获取实时行情失败: {e}")
+            return pd.DataFrame()
+
 
 # 全局客户端单例
 _client: Optional[TushareClient] = None

@@ -183,17 +183,24 @@ async def get_stock_info(code: str = Query(..., description="股票代码，如 
         stock_list = data_source.get_stock_list()
         if not stock_list.empty:
             stock_code = ts_code.split(".")[0]
-            matched = stock_list[stock_list["代码"] == stock_code]
+            # UnifiedDataSource returns columns: ts_code, symbol, name
+            if "symbol" in stock_list.columns:
+                matched = stock_list[stock_list["symbol"] == stock_code]
+            elif "代码" in stock_list.columns:
+                matched = stock_list[stock_list["代码"] == stock_code]
+            else:
+                matched = pd.DataFrame()
+
             if not matched.empty:
                 row = matched.iloc[0]
                 return {
                     "success": True,
                     "data": {
                         "ts_code": ts_code,
-                        "name": row.get("名称", ""),
-                        "price": row.get("最新价", 0),
-                        "change_pct": row.get("涨跌幅", 0),
-                        "industry": "",
+                        "name": row.get("name", row.get("名称", "")),
+                        "price": row.get("price", row.get("最新价", 0)),
+                        "change_pct": row.get("change", row.get("涨跌幅", 0)),
+                        "industry": row.get("industry", ""),
                     },
                 }
         
@@ -562,6 +569,8 @@ async def diagnose_stock(request: DiagnoseRequest):
         
         if report is None:
             raise HTTPException(status_code=404, detail=f"未找到股票: {request.ts_code}")
+        
+        logger.info(f"个股诊疗成功: {request.ts_code} - {report.stock.name}")
         
         return {
             "success": True,

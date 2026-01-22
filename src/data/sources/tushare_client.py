@@ -37,6 +37,9 @@ class TushareClient:
         proxy_url = "http://user:liuhkcxjvasrdg@8.140.4.230:8888"
         os.environ["HTTP_PROXY"] = proxy_url
         os.environ["HTTPS_PROXY"] = proxy_url
+        # Configure NO_PROXY to prevent other clients (like AkShare/Eastmoney) from using this proxy
+        # Note: Add leading dots for subdomain matching and specific domains
+        os.environ["NO_PROXY"] = "eastmoney.com,.eastmoney.com,sina.com.cn,.sina.com.cn,sinajs.cn,.sinajs.cn,127.0.0.1,localhost"
         
         # 初始化 Tushare Pro API
         ts.set_token(self.token)
@@ -78,12 +81,16 @@ class TushareClient:
         self,
         ts_code: Optional[str] = None,
         trade_date: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
     ) -> pd.DataFrame:
         """获取每日基本面指标（PE、PB、换手率等）
         
         Args:
             ts_code: 股票代码
             trade_date: 交易日期
+            start_date: 开始日期
+            end_date: 结束日期
             
         Returns:
             基本面指标 DataFrame
@@ -92,6 +99,8 @@ class TushareClient:
             df = self.pro.daily_basic(
                 ts_code=ts_code,
                 trade_date=trade_date,
+                start_date=start_date,
+                end_date=end_date,
                 fields="ts_code,trade_date,close,turnover_rate,turnover_rate_f,"
                        "volume_ratio,pe,pe_ttm,pb,ps,ps_ttm,dv_ratio,dv_ttm,"
                        "total_share,float_share,free_share,total_mv,circ_mv",
@@ -130,22 +139,24 @@ class TushareClient:
             logger.error(f"获取指数数据失败: {e}")
             raise
     
-    def get_stock_list(self, market: Optional[str] = None) -> pd.DataFrame:
+    def get_stock_list(self, market: Optional[str] = None, ts_code: Optional[str] = None) -> pd.DataFrame:
         """获取股票列表
         
         Args:
             market: 市场类型（主板/创业板/科创板/北交所）
+            ts_code: 股票代码（如果指定，只查询该股票）
             
         Returns:
             股票列表 DataFrame
         """
         try:
             df = self.pro.stock_basic(
+                ts_code=ts_code if ts_code else "",
                 exchange="",
                 list_status="L",
                 fields="ts_code,symbol,name,area,industry,market,list_date",
             )
-            if market:
+            if market and not ts_code:
                 df = df[df["market"] == market]
             logger.debug(f"获取股票列表, 记录数: {len(df)}")
             return df
@@ -202,11 +213,16 @@ class TushareClient:
             北向资金数据 DataFrame
         """
         try:
-            df = self.pro.moneyflow_hsgt(
-                trade_date=trade_date,
-                start_date=start_date,
-                end_date=end_date,
-            )
+            # 过滤 None 参数
+            kwargs = {
+                k: v for k, v in {
+                    "trade_date": trade_date,
+                    "start_date": start_date,
+                    "end_date": end_date,
+                }.items() if v is not None
+            }
+            
+            df = self.pro.moneyflow_hsgt(**kwargs)
             logger.debug(f"获取北向资金数据, 记录数: {len(df)}")
             return df
         except Exception as e:
@@ -239,6 +255,97 @@ class TushareClient:
             return df
         except Exception as e:
             logger.error(f"获取 Shibor 数据失败: {e}")
+            raise
+
+
+    def get_fina_indicator(
+        self,
+        ts_code: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        period: Optional[str] = None
+    ) -> pd.DataFrame:
+        """获取财务指标数据
+        
+        Args:
+            ts_code: 股票代码
+            start_date: 开始日期
+            end_date: 结束日期
+            period: 报告期
+            
+        Returns:
+            财务指标 DataFrame
+        """
+        try:
+            df = self.pro.fina_indicator(
+                ts_code=ts_code,
+                start_date=start_date,
+                end_date=end_date,
+                period=period
+            )
+            logger.debug(f"获取财务指标: {ts_code}, 记录数: {len(df)}")
+            return df
+        except Exception as e:
+            logger.error(f"获取财务指标失败: {e}")
+            raise
+
+    def get_moneyflow(
+        self,
+        ts_code: str,
+        trade_date: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None
+    ) -> pd.DataFrame:
+        """获取个股资金流向
+        
+        Args:
+            ts_code: 股票代码
+            trade_date: 交易日期
+            start_date: 开始日期
+            end_date: 结束日期
+            
+        Returns:
+            资金流向 DataFrame
+        """
+        try:
+            df = self.pro.moneyflow(
+                ts_code=ts_code,
+                trade_date=trade_date,
+                start_date=start_date,
+                end_date=end_date
+            )
+            logger.debug(f"获取个股资金流向: {ts_code}, 记录数: {len(df)}")
+            return df
+        except Exception as e:
+            logger.error(f"获取个股资金流向失败: {e}")
+            raise
+
+    def get_forecast(
+        self,
+        ts_code: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None
+    ) -> pd.DataFrame:
+        """获取业绩预告
+        
+        Args:
+            ts_code: 股票代码
+            start_date: 公告开始日期
+            end_date: 公告结束日期
+            
+        Returns:
+            业绩预告 DataFrame
+        """
+        try:
+            df = self.pro.forecast(
+                ts_code=ts_code,
+                start_date=start_date,
+                end_date=end_date
+            )
+            logger.debug(f"获取业绩预告: {ts_code}, 记录数: {len(df)}")
+            return df
+        except Exception as e:
+            logger.error(f"获取业绩预告失败: {e}")
             raise
 
 

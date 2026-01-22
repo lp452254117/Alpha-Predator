@@ -2,6 +2,9 @@
 
 包含量化分析师角色设定和各类分析任务的 Prompt 模板。
 基于 Chain-of-Thought (CoT) 和 Role-Playing 技术。
+
+这里不是模板渲染。而是典型的LLM 应用工程实践 —— 用模板约束大模型输出格式
+
 """
 
 from dataclasses import dataclass
@@ -429,6 +432,7 @@ def get_prompt_template(name: str) -> Optional[PromptTemplate]:
         "deep_dive": DEEP_DIVE_TEMPLATE,
         "sector_analysis": SECTOR_ANALYSIS_TEMPLATE,
         "stock_recommendation": STOCK_RECOMMENDATION_TEMPLATE,
+        "portfolio_diagnose": PORTFOLIO_DIAGNOSE_TEMPLATE,
     }
     return templates.get(name)
 
@@ -495,23 +499,3 @@ $positions_data
 - **风险提示**：[具体的风险点]
 """),
 )
-
-
-def get_prompt_template(name: str) -> Optional[PromptTemplate]:
-    """获取 Prompt 模板
-    
-    Args:
-        name: 模板名称
-        
-    Returns:
-        模板对象，未找到返回 None
-    """
-    templates = {
-        "alpha_predator": ALPHA_PREDATOR_TEMPLATE,
-        "incremental_update": INCREMENTAL_UPDATE_TEMPLATE,
-        "deep_dive": DEEP_DIVE_TEMPLATE,
-        "sector_analysis": SECTOR_ANALYSIS_TEMPLATE,
-        "stock_recommendation": STOCK_RECOMMENDATION_TEMPLATE,
-        "portfolio_diagnose": PORTFOLIO_DIAGNOSE_TEMPLATE,
-    }
-    return templates.get(name)

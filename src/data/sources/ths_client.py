@@ -125,7 +125,7 @@ class THSClient:
                 "pre_close": float(row.get("昨收", 0)),
             }
         except Exception as e:
-            logger.error(f"获取实时行情失败: {e}")
+            logger.warning(f"获取实时行情失败: {e}")
             return None
     
     def get_money_flow(self, ts_code: str) -> Optional[dict]:
@@ -170,7 +170,7 @@ class THSClient:
             logger.info(f"获取板块资金流向: {len(df)} 条")
             return df
         except Exception as e:
-            logger.error(f"获取板块资金流向失败: {e}")
+            logger.warning(f"获取板块资金流向失败: {e}")
             return pd.DataFrame()
     
     def get_hot_stocks(self) -> pd.DataFrame:
@@ -184,7 +184,7 @@ class THSClient:
             logger.info(f"获取热门股票: {len(df)} 条")
             return df
         except Exception as e:
-            logger.error(f"获取热门股票失败: {e}")
+            logger.warning(f"获取热门股票失败: {e}")
             return pd.DataFrame()
     
     def get_dragon_tiger_list(self, trade_date: Optional[str] = None) -> pd.DataFrame:
@@ -379,7 +379,7 @@ class THSClient:
                 "value": float(latest.get("value", 0)),  # 单位：万元
             }
         except Exception as e:
-            logger.error(f"获取北向资金失败: {e}")
+            logger.warning(f"获取北向资金失败: {e}")
             return None
 
     def format_for_llm(self, data: dict) -> str:
@@ -625,6 +625,6 @@ class THSClient:
             logger.info(f"获取研报 {ts_code}: {len(df)} 条")
             return df
         except Exception as e:
-            logger.error(f"获取研报失败: {e}")
+            logger.warning(f"获取研报失败: {e}")
             return pd.DataFrame()
 

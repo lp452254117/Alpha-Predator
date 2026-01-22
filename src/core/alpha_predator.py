@@ -430,18 +430,33 @@ Shibor 利率:
         concept_data = "暂无数据"
         
         try:
-            if self.data_source.is_akshare:
+            # 1. 初始化 AkShare 客户端 (作为补充/Fallback)
+            ths = None
+            try:
                 from src.data.sources.ths_client import THSClient
                 ths = THSClient()
-                
-                # 1. 获取行业板块资金流向排名
+            except Exception as e:
+                logger.warning(f"AkShare 客户端初始化失败: {e}")
+
+            # 2. 获取行业板块资金流向 (优先 AkShare)
+            if self.data_source.is_akshare:
                 sector_df = self.data_source.get_sector_flow()
-                if not sector_df.empty:
-                    top_sectors = sector_df.head(15)
-                    sector_flow_data = top_sectors.to_string(index=False)
-                    logger.info(f"获取板块资金流向: {len(sector_df)} 个板块")
-                
-                # 2. 获取概念板块涨幅排行
+            elif ths:
+                # Tushare 模式下尝试用 AkShare 补充
+                try:
+                    sector_df = ths.ak.stock_sector_fund_flow_rank(indicator="今日", sector_type="行业资金流")
+                except:
+                    sector_df = None
+            else:
+                 sector_df = None
+
+            if sector_df is not None and not sector_df.empty:
+                top_sectors = sector_df.head(15)
+                sector_flow_data = top_sectors.to_string(index=False)
+                logger.info(f"获取板块资金流向: {len(sector_df)} 个板块")
+            
+            # 3. 获取概念板块 (仅 AkShare 支持)
+            if ths:
                 try:
                     concept_df = ths.ak.stock_board_concept_name_em()
                     if concept_df is not None and not concept_df.empty:
@@ -449,22 +464,31 @@ Shibor 利率:
                         logger.info(f"获取概念板块: {len(concept_df)} 个")
                 except Exception as e:
                     logger.warning(f"获取概念板块失败: {e}")
+            
+            # 4. 获取指数数据 (UnifiedDataSource 处理)
+            index_df = self.data_source.get_index_spot()
+            if not index_df.empty:
+                index_data = index_df.head(10).to_string(index=False)
+            
+            # 5. 获取北向资金
+            north_data = self.data_source.get_north_flow()
+            if north_data:
+                # 统一格式化
+                north_money = north_data.get('north_money', north_data.get('value', 0))
+                # Tushare 单位: 亿 (float), AkShare value: 元 (float)
+                # 简单判断: 如果绝对值大则是元，小则是亿 (或者根据 keys 判断)
                 
-                # 3. 获取指数数据
-                index_df = self.data_source.get_index_spot()
-                if not index_df.empty:
-                    index_data = index_df.head(10).to_string(index=False)
-                
-                # 4. 获取北向资金
-                north_data = self.data_source.get_north_flow()
-                if north_data:
-                    value = north_data.get('value', 0)
-                    # 单位转换（可能是万元）
-                    if abs(value) > 10000:
-                        north_flow_data = f"今日净流入: {value / 10000:.2f} 亿元"
-                    else:
-                        north_flow_data = f"今日净流入: {value:.2f} 万元"
-                    
+                if self.data_source.is_tushare:
+                     north_flow_data = f"今日净流入: {north_money:.2f} 亿元"
+                else: 
+                     # AkShare returns in Yuan
+                     if abs(north_money) > 100000000:
+                         north_flow_data = f"今日净流入: {north_money / 100000000:.2f} 亿元"
+                     elif abs(north_money) > 10000:
+                         north_flow_data = f"今日净流入: {north_money / 10000:.2f} 万元"
+                     else:
+                         north_flow_data = f"今日净流入: {north_money:.2f} 元"
+
         except Exception as e:
             logger.error(f"采集板块数据失败: {e}")
         
@@ -528,6 +552,7 @@ Shibor 利率:
         """
         import json
         from src.ai.llm.prompts import STOCK_RECOMMENDATION_TEMPLATE
+        import pandas as pd
         
         self._ensure_initialized()
         
@@ -541,31 +566,85 @@ Shibor 利率:
         sector_stock_list = "暂无数据"
         
         try:
-            if self.data_source.is_akshare:
+            # 1. 初始化 AkShare 客户端 (作为补充/Fallback)
+            ths = None
+            try:
                 from src.data.sources.ths_client import THSClient
                 ths = THSClient()
-                
-                # 1. 获取板块成分股
-                sector_stocks = []
-                for sector in selected_sectors:
+            except Exception as e:
+                 logger.warning(f"AkShare 客户端初始化失败: {e}")
+
+            # 2. 获取板块成分股
+            sector_stocks = []
+            
+            if self.data_source.is_tushare:
+                # Hybrid Mode: Try Tushare first, fallback to AkShare for constituents
+                # Tushare logic for constituents involves querying stock_basic + daily potentially, 
+                # but explicit "sector constituent" API is needed. 
+                # Tushare 'index_weight' is for indices, 'stock_basic' has industry.
+                # Use Tushare to filter by industry.
+                try:
+                    df_all = self.data_source.get_stock_list()
+                    for sector in selected_sectors:
+                        # Fuzzy match industry
+                        if not df_all.empty:
+                            matched = df_all[df_all['industry'].str.contains(sector, na=False)]
+                            if not matched.empty:
+                                # Normalization to AkShare format
+                                matched = matched.rename(columns={
+                                    'ts_code': '代码',
+                                    'name': '名称',
+                                    'industry': '行业'
+                                })
+                                # Fetch latest price for these stocks (batch 10)
+                                subset = matched.head(10)
+                                for _, row in subset.iterrows():
+                                    code = row['代码']
+                                    # Fallback to AkShare format: just keep Code/Name
+                                    sector_stocks.append(row.to_dict())
+                            else:
+                                 # If not found in Tushare, try AkShare if available
+                                 if ths:
+                                     cons = ths.ak.stock_board_industry_cons_em(symbol=sector)
+                                     if cons is not None and not cons.empty:
+                                        sector_stocks.extend(cons.head(10).to_dict('records'))
+                except Exception as e:
+                    logger.warning(f"Tushare 获取板块成分股失败: {e}")
+
+            elif ths: 
+                 # Pure AkShare Mode
+                 for sector in selected_sectors:
                     try:
-                        # 获取行业板块成分股
                         df = ths.ak.stock_board_industry_cons_em(symbol=sector)
                         if df is not None and not df.empty:
                             sector_stocks.extend(df.head(10).to_dict('records'))
                     except Exception as e:
-                        logger.warning(f"获取板块 {sector} 成分股失败: {e}")
-                        continue
+                        logger.warning(f"AkShare 获取板块 {sector} 成分股失败: {e}")
+
+            if sector_stocks:
+                # Normalize keys for LLM consistency
+                normalized_stocks = []
+                for s in sector_stocks[:20]:
+                    # Standardize to: 代码, 名称, 最新价
+                    n_stock = {}
+                    n_stock['代码'] = s.get('代码', s.get('ts_code', ''))
+                    n_stock['名称'] = s.get('名称', s.get('name', ''))
+                    n_stock['最新价'] = s.get('最新价', s.get('price', s.get('close', 'N/A')))
+                    normalized_stocks.append(n_stock)
                 
-                if sector_stocks:
-                    sector_stock_list = str(sector_stocks[:20])
-                
-                # 2. 获取板块内热门股票行情
-                hot_stocks = self.data_source.get_hot_stocks()
-                if not hot_stocks.empty:
-                    stock_quotes = hot_stocks.head(30).to_string(index=False)
-                
-                # 3. 获取个股资金流向排行
+                sector_stock_list = str(normalized_stocks)
+            
+            # 3. 获取板块内热门股票行情 & 资金流向 & 涨停 (Use AkShare if available, it's richer)
+            if ths:
+                # Hot Stocks
+                try:
+                    hot_stocks = ths.get_hot_stocks()
+                    if not hot_stocks.empty:
+                        stock_quotes = hot_stocks.head(30).to_string(index=False)
+                except Exception as e:
+                    logger.warning(f"获取热门股票失败: {e}")
+
+                # Money Flow
                 try:
                     flow_df = ths.ak.stock_individual_fund_flow_rank(indicator="今日")
                     if flow_df is not None and not flow_df.empty:
@@ -573,7 +652,7 @@ Shibor 利率:
                 except Exception as e:
                     logger.warning(f"获取资金流向排行失败: {e}")
                 
-                # 4. 获取涨停股（技术强势股）
+                 # ZT Pool
                 try:
                     zt_df = ths.get_zt_pool()
                     if zt_df is not None and not zt_df.empty:
@@ -607,7 +686,7 @@ Shibor 利率:
         
         # 在 prompt 中追加板块成分股信息
         if sector_stock_list != "暂无数据":
-            prompt += f"\n\n### 板块成分股参考\n{sector_stock_list}"
+            prompt += f"\n\n### 板块成分股参考 (已标准化)\n{sector_stock_list}"
         
         # 调用 LLM
         messages = [

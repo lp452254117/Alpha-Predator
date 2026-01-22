@@ -104,6 +104,22 @@ class UnifiedDataSource:
         """获取今日日期字符串（YYYYMMDD）"""
         return date.today().strftime("%Y%m%d")
     
+    def normalize_code(self, code: str) -> str:
+        """标准化股票代码"""
+        code = str(code).strip()
+        if "." in code:
+            return code
+        
+        # 常见规则
+        if code.startswith(("60", "68")):
+            return f"{code}.SH"
+        elif code.startswith(("00", "30")):
+            return f"{code}.SZ"
+        elif code.startswith(("8", "4")):
+            return f"{code}.BJ"
+            
+        return code
+
     def get_daily_data(
         self,
         ts_code: str,
@@ -112,6 +128,7 @@ class UnifiedDataSource:
     ) -> pd.DataFrame:
         """获取日线数据"""
         if self.is_tushare:
+            ts_code = self.normalize_code(ts_code)
             return self._tushare.get_daily(
                 ts_code=ts_code,
                 start_date=start_date,
@@ -140,10 +157,11 @@ class UnifiedDataSource:
         else:
             # Tushare 需要查询 stock_basic
             try:
-                df = self._tushare.get_stock_list()
-                row = df[df['ts_code'] == ts_code]
-                if not row.empty:
-                    r = row.iloc[0]
+                # 优化：直接查询指定代码，避免全量拉取
+                ts_code = self.normalize_code(ts_code)
+                df = self._tushare.get_stock_list(ts_code=ts_code)
+                if not df.empty:
+                    r = df.iloc[0]
                     return {
                         'ts_code': ts_code,
                         'name': r.get('name', ''),
@@ -189,12 +207,22 @@ class UnifiedDataSource:
         """获取北向资金数据"""
         if self.is_tushare:
             try:
-                df = self._tushare.get_moneyflow_hsgt(trade_date=trade_date)
+                if trade_date:
+                    df = self._tushare.get_moneyflow_hsgt(trade_date=trade_date)
+                else:
+                    # 如果未指定日期，获取最近 30 天的数据（Tushare 默认返回按日期降序）
+                    # 避免传参 None 导致校验失败
+                    from datetime import datetime, timedelta
+                    end_date = self.get_today_str()
+                    start_date = (datetime.strptime(end_date, "%Y%m%d") - timedelta(days=30)).strftime("%Y%m%d")
+                    df = self._tushare.get_moneyflow_hsgt(start_date=start_date, end_date=end_date)
+                
                 if not df.empty:
+                    # 取最新的一条
                     row = df.iloc[0]
                     return {
-                        'north_money': row.get('north_money', 0),
-                        'south_money': row.get('south_money', 0),
+                        'north_money': float(row.get('north_money', 0)),
+                        'south_money': float(row.get('south_money', 0)),
                     }
             except Exception as e:
                 logger.error(f"获取北向资金失败: {e}")

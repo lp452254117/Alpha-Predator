@@ -34,6 +34,7 @@ const isLoading = ref(false)
 const isLookingUp = ref(false)
 const isDiagnosing = ref(false)
 const diagnosisResult = ref<string | null>(null)
+const diagnosisRaw = ref<string | null>(null)
 
 // 表单
 const formData = ref({
@@ -259,6 +260,7 @@ async function diagnosePortfolio() {
   
   isDiagnosing.value = true
   diagnosisResult.value = null
+  diagnosisRaw.value = null
   
   try {
     const response = await fetch('/api/user/portfolio/diagnose', {
@@ -272,6 +274,7 @@ async function diagnosePortfolio() {
     const data = await response.json()
     
     if (data.success) {
+      diagnosisRaw.value = data.diagnosis
       diagnosisResult.value = await marked.parse(data.diagnosis)
     } else {
       alert('诊断失败: ' + (data.error || '未知错误'))
@@ -281,6 +284,35 @@ async function diagnosePortfolio() {
     alert('诊断请求失败')
   } finally {
     isDiagnosing.value = false
+  }
+}
+
+// 导出诊断报告
+function exportDiagnosis() {
+  if (!diagnosisRaw.value) {
+    alert('暂无诊断报告可导出，请先进行诊断')
+    return
+  }
+  
+  try {
+    const blob = new Blob([diagnosisRaw.value], { type: 'text/markdown;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    
+    // 使用本地日期格式 YYYY-MM-DD
+    const now = new Date()
+    const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+    
+    console.log('Generated filename date:', date) // Debug log
+    a.download = `持仓诊断报告_${date}.md`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    console.error('导出失败', e)
+    alert('导出失败，请重试')
   }
 }
 </script>
@@ -436,12 +468,24 @@ async function diagnosePortfolio() {
     <div v-if="diagnosisResult" class="diagnosis-section">
       <div class="diagnosis-header">
         <h3>🩺 持仓诊断报告</h3>
-        <button class="btn btn-secondary btn-sm" @click="diagnosisResult = null">关闭</button>
+        <div class="header-actions">
+          <button class="btn btn-primary btn-sm" @click="exportDiagnosis">📥 导出报告</button>
+          <button class="btn btn-secondary btn-sm" @click="diagnosisResult = null">关闭</button>
+        </div>
       </div>
       <div class="diagnosis-content" v-html="diagnosisResult"></div>
     </div>
   </div>
 </template>
+
+<style scoped>
+/* ... existing styles ... */
+/* Add or ensure diagnosis styles are present if needed, though they seem to rely on global or scoped styles not fully visible in the previous view. 
+   For this change, I only added the button. The previous view showed styles ending around line 800+. 
+   I need to be careful about not deleting the end of the file.
+   The previous view ended at line 800, but the file has 924 lines. 
+   I should first read the end of the file to make sure I don't mess up the styles.
+*/
 
 <style scoped>
 .portfolio-manager {

@@ -221,16 +221,19 @@ class DeepDiveDiagnostic:
                     except Exception as e:
                         logger.warning(f"计算价格统计失败: {e}")
 
-                # 5. 公告/业绩预告 (Forecast as Announcements fallback)
+                # 5. 公司大事 (以前尝试公告API失败，现在聚合 Forecast/Express/Dividend/Float)
                 try:
-                    forecast = self.data_source._tushare.get_forecast(
+                    # 获取最近 90 天大事
+                    start_date_ann = (date.today() - timedelta(days=90)).strftime("%Y%m%d")
+                    events_df = self.data_source._tushare.get_corporate_events(
                         ts_code=ts_code,
-                        start_date=(datetime.now() - timedelta(days=365)).strftime("%Y%m%d")
+                        start_date=start_date_ann,
+                        end_date=end_date
                     )
-                    if forecast is not None and not forecast.empty:
-                        data["announcements"] = forecast.head(5)
+                    if not events_df.empty:
+                        data["events"] = events_df.head(10)
                 except Exception as e:
-                    logger.warning(f"获取业绩预告失败: {e}")
+                    logger.warning(f"获取公司大事失败: {e}")
 
                 # 6. 行业信息 (Stock Info already has industry, but getting detailed list if needed or just skip)
                 # Tushare doesn't have a direct "industry ranking" API in basic package easily mapped, 
@@ -330,12 +333,13 @@ class DeepDiveDiagnostic:
     def format_fundamental_data(self, data: dict) -> str:
         """格式化基本面数据"""
         result = []
-        
+        logger.info("基本信息")
+        logger.info(data)
         # Tushare 基本面数据
         basic = data.get("daily_basic")
         if basic is not None and not basic.empty:
             row = basic.iloc[0]
-            result.append("### Tushare 基本面")
+            result.append("### 基本面")
             result.append("| 指标 | 数值 |")
             result.append("|------|------|")
             result.append(f"| 收盘价 | {row.get('close', 'N/A')} |")
@@ -344,7 +348,6 @@ class DeepDiveDiagnostic:
             result.append(f"| 市销率 (PS-TTM) | {self._safe_format(row.get('ps_ttm'))} |")
             result.append(f"| 股息率 | {self._safe_format(row.get('dv_ratio'))}% |")
             result.append(f"| 换手率 | {self._safe_format(row.get('turnover_rate'))}% |")
-            
             total_mv = row.get('total_mv')
             total_mv_val = total_mv / 10000 if total_mv is not None else None
             result.append(f"| 总市值 | {self._safe_format(total_mv_val)} 亿 |")
@@ -394,6 +397,12 @@ class DeepDiveDiagnostic:
                     'sell_lg_amount': '大单卖(万)',
                     'net_mf_amount': '净流入(万)'
                 })
+                
+                # 格式化日期 YYYYMMDD -> YYYY-MM-DD
+                if '日期' in df_display.columns:
+                    df_display['日期'] = df_display['日期'].apply(lambda x: str(x)[:4] + '-' + str(x)[4:6] + '-' + str(x)[6:] if len(str(x)) == 8 else str(x))
+                    
+                # 仅显示存在的列
                 # 仅显示存在的列
                 cols = [c for c in ['日期', '大单买(万)', '大单卖(万)', '净流入(万)'] if c in df_display.columns]
                 result.append(df_display[cols].head(5).to_markdown(index=False))
@@ -505,6 +514,30 @@ class DeepDiveDiagnostic:
 ### 信号理由
 {chr(10).join(['- ' + r for r in signal.get('reasons', [])])}
 """
+
+    def format_events_data(self, data: dict) -> str:
+        """格式化事件数据（公告/新闻）"""
+        events = data.get("events")
+        if events is None or events.empty:
+            # 尝试回退到 news
+            news = data.get("news")
+            if news:
+                return "\n".join([f"- [{n.get('datetime', '')}] {n.get('title', '')}" for n in news[:5]])
+            return "暂无近期重大事件"
+
+        # Tushare Disclosure 格式
+        # columns: ann_date, title, type
+        result = []
+        for _, row in events.iterrows():
+            date_str = row.get("ann_date", "")
+            title = row.get("title", "")
+            # 格式化日期 YYYYMMDD -> YYYY-MM-DD
+            if len(str(date_str)) == 8:
+                date_str = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
+                
+            result.append(f"- [{date_str}] {title}")
+            
+        return "\n".join(result)
     
     async def diagnose(self, ts_code: str) -> Optional[DiagnosticReport]:
         """执行个股诊疗
@@ -533,17 +566,28 @@ class DeepDiveDiagnostic:
         fundamental = self.format_fundamental_data(data)
         technical = self.format_technical_data(data)
         capital = self.format_signal_data(data)
-        
+
+        logger.info("渲染的数据")
+        logger.info([
+            stock_info,
+            fundamental,
+            technical,
+            capital,
+            self.format_events_data(data)
+        ])
+
         # 渲染 Prompt
         prompt = render_prompt(
             DEEP_DIVE_TEMPLATE,
             ts_code=stock_info.ts_code,
             stock_name=stock_info.name,
             industry=stock_info.industry,
+            technical=technical,
+            capital=capital,
             fundamental_data=fundamental,
             technical_data=technical,
             capital_data=capital,
-            events_data="（事件数据需要接入公告 API）",
+            events_data=self.format_events_data(data),
         )
         
         # 调用 LLM

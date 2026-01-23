@@ -370,6 +370,99 @@ class TushareClient:
             logger.error(f"获取实时行情失败: {e}")
             return pd.DataFrame()
 
+    def get_corporate_events(
+        self,
+        ts_code: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None
+    ) -> pd.DataFrame:
+        """获取公司大事（替代公告接口）
+        
+        聚合：
+        1. 业绩预告 (forecast)
+        2. 业绩快报 (express)
+        3. 分红送转 (dividend)
+        4. 限售解禁 (share_float)
+        
+        Returns:
+            DataFrame columns: [ann_date, title, type]
+        """
+        events = []
+        
+        try:
+            # 1. 业绩预告
+            df_forecast = self.pro.forecast(ts_code=ts_code, start_date=start_date, end_date=end_date)
+            if not df_forecast.empty:
+                for _, row in df_forecast.iterrows():
+                    type_str = row.get('type', '未知')
+                    min_chg = row.get('p_change_min')
+                    max_chg = row.get('p_change_max')
+                    chg_str = f"{min_chg}%~{max_chg}%" if min_chg and max_chg else "N/A"
+                    events.append({
+                        'ann_date': row.get('ann_date'),
+                        'title': f"业绩预告: {type_str} ({chg_str})",
+                        'type': 'forecast'
+                    })
+            
+            # 2. 业绩快报
+            df_express = self.pro.express(ts_code=ts_code, start_date=start_date, end_date=end_date)
+            if not df_express.empty:
+                for _, row in df_express.iterrows():
+                    rev_yoy = row.get('revenue_yoy')
+                    net_yoy = row.get('yoy_net_profit')
+                    events.append({
+                        'ann_date': row.get('ann_date'),
+                        'title': f"业绩快报: 营收同比{rev_yoy}%, 净利同比{net_yoy}%",
+                        'type': 'express'
+                    })
+                    
+            # 3. 分红送转
+            df_div = self.pro.dividend(ts_code=ts_code, ann_date=start_date) # dividend usually filters by ann_date
+            # Tushare dividend API annoyingly filters by specific date usually or just ts_code.
+            # Let's try just ts_code and filter later if needed, but pro.dividend might need fields.
+            # Using defaults.
+            if df_div is not None and not df_div.empty: # Assuming previous call cached or we make new one
+                pass # Already called? No.
+            
+            # Actually calling dividend inside structure
+            df_div = self.pro.dividend(ts_code=ts_code)
+            if not df_div.empty:
+               # Filter by date if start_date provided
+               if start_date:
+                   df_div = df_div[df_div['ann_date'] >= start_date]
+               if end_date:
+                   df_div = df_div[df_div['ann_date'] <= end_date]
+               
+               for _, row in df_div.iterrows():
+                   plan = row.get('div_proc', '实施')
+                   stk = row.get('stk_div', 0)
+                   cash = row.get('cash_div_tax', 0)
+                   events.append({
+                       'ann_date': row.get('ann_date'),
+                       'title': f"分红: {plan} (10送{stk}派{cash}元)",
+                       'type': 'dividend'
+                   })
+
+            # 4. 限售解禁
+            df_float = self.pro.share_float(ts_code=ts_code, start_date=start_date, end_date=end_date)
+            if not df_float.empty:
+                for _, row in df_float.iterrows():
+                    ratio = row.get('float_ratio', 0)
+                    events.append({
+                        'ann_date': row.get('float_date'), # Using float_date as event date
+                        'title': f"限售解禁: 比例{ratio}%",
+                        'type': 'share_float'
+                    })
+                    
+        except Exception as e:
+            logger.warning(f"获取公司大事失败: {e}")
+            
+        if not events:
+            return pd.DataFrame()
+            
+        df_res = pd.DataFrame(events)
+        return df_res.sort_values('ann_date', ascending=False)
+
 
 # 全局客户端单例
 _client: Optional[TushareClient] = None

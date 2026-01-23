@@ -875,6 +875,37 @@ async def diagnose_portfolio(request: PortfolioRequest):
 ---
 """
         
+        # 获取市场核心数据（新增）
+        market_data_str = "暂无数据"
+        northbound_data_str = "暂无数据"
+        
+        try:
+            # 1. 市场指数
+            index_df = deep_dive.data_source.get_index_spot()
+            if not index_df.empty:
+                market_data_str = "| 指数 | 最新价 | 涨跌幅 | 成交量(手) |\n|---|---|---|---|\n"
+                # 筛选主要指数
+                target_indices = ["上证指数", "深证成指", "创业板指", "科创50"]
+                found_indices = 0
+                for _, row in index_df.iterrows():
+                    name = row.get("名称", "")
+                    if any(target in name for target in target_indices) and found_indices < 5:
+                        price = row.get("最新价", 0)
+                        change = row.get("涨跌幅", 0)
+                        vol = row.get("成交量", 0)
+                        market_data_str += f"| {name} | {price} | {change}% | {vol} |\n"
+                        found_indices += 1
+            
+            # 2. 北向资金
+            north_data = deep_dive.data_source.get_north_flow()
+            if north_data:
+                northbound_data_str = "| 项目 | 金额(亿元) |\n|---|---|\n"
+                northbound_data_str += f"| 北向资金净流入 | {north_data.get('north_money', 0) / 10000:.2f} |\n"
+                northbound_data_str += f"| 南向资金净流入 | {north_data.get('south_money', 0) / 10000:.2f} |\n"
+                
+        except Exception as data_err:
+            logger.warning(f"获取看板数据失败: {data_err}")
+
         # 渲染 Prompt
         from src.ai.llm.prompts import PORTFOLIO_DIAGNOSE_TEMPLATE, render_prompt
         
@@ -884,7 +915,9 @@ async def diagnose_portfolio(request: PortfolioRequest):
             total_market_value=f"{total_market_value:,.0f}",
             available_capital=f"{available_capital:,.0f}",
             position_ratio=f"{total_market_value / request.total_capital * 100:.1f}%" if request.total_capital > 0 else "0%",
-            positions_data=positions_str
+            positions_data=positions_str,
+            market_data=market_data_str,
+            northbound_data=northbound_data_str
         )
         
         messages = [

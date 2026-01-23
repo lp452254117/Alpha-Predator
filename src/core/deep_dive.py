@@ -409,6 +409,28 @@ class DeepDiveDiagnostic:
             else:
                 result.append(fund_flow.to_markdown(index=False))
         
+        # 近10日行情
+        daily_df = data.get("daily")
+        if daily_df is not None and not daily_df.empty:
+            result.append("\n### 近10日行情")
+            # Sort by date desc
+            df_recent = daily_df.sort_values("trade_date", ascending=False).head(10)
+            # Rename columns
+            df_display = df_recent.rename(columns={
+                'trade_date': '日期',
+                'close': '收盘价',
+                'pct_chg': '涨跌幅%',
+                'vol': '成交量(手)'
+            })
+            
+             # 格式化日期 YYYYMMDD -> YYYY-MM-DD
+            if '日期' in df_display.columns:
+                df_display['日期'] = df_display['日期'].apply(lambda x: str(x)[:4] + '-' + str(x)[4:6] + '-' + str(x)[6:] if len(str(x)) == 8 else str(x))
+            
+            # Select columns
+            cols = [c for c in ['日期', '收盘价', '涨跌幅%', '成交量(手)'] if c in df_display.columns]
+            result.append(df_display[cols].to_markdown(index=False))
+
         # 历史价格统计
         price_stats = data.get("price_stats")
         if price_stats:

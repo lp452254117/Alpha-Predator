@@ -363,8 +363,13 @@ class TushareClient:
             # It expects code string/list. 
             # If we pass "000001.SZ", does it work? 
             # Usually strict numbers like "000001".
-            code = ts_code.split('.')[0]
-            df = ts.get_realtime_quotes(code)
+            if isinstance(ts_code, list):
+                # Handle list of codes
+                codes = [c.split('.')[0] if isinstance(c, str) else str(c) for c in ts_code]
+                df = ts.get_realtime_quotes(codes)
+            else:
+                code = ts_code.split('.')[0]
+                df = ts.get_realtime_quotes(code)
             return df
         except Exception as e:
             logger.error(f"获取实时行情失败: {e}")

@@ -7,6 +7,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { marked } from 'marked'
 
 interface Position {
+  id?: number
   ts_code: string
   name: string
   quantity: number
@@ -72,26 +73,32 @@ function isMarketOpen(): boolean {
   return (time >= 930 && time <= 1130) || (time >= 1300 && time <= 1500)
 }
 
-// 初始化：从 localStorage 加载
-onMounted(() => {
-  const saved = localStorage.getItem('portfolio')
-  if (saved) {
-    try {
-      portfolio.value = JSON.parse(saved)
-    } catch (e) {
-      console.error('加载持仓数据失败', e)
+// 获取持仓列表
+async function fetchPositions() {
+  try {
+    const response = await fetch('/api/portfolio')
+    const data = await response.json()
+    if (Array.isArray(data)) {
+      portfolio.value.positions = data
+      refreshQuotes()
     }
+  } catch (e) {
+    console.error('加载持仓失败', e)
   }
+}
+
+// 初始化：从 API 加载
+onMounted(() => {
+  fetchPositions()
   // 只在交易时间刷新行情
   if (isMarketOpen()) {
-    refreshQuotes()
+    // refreshQuotes called inside fetchPositions
   }
 })
 
-// 监听变化，自动保存
-watch(portfolio, (newVal) => {
-  localStorage.setItem('portfolio', JSON.stringify(newVal))
-}, { deep: true })
+// Removed watch(portfolio) logic as we persist on save/delete actions
+
+
 
 // 股票代码自动识别
 async function lookupStock() {
@@ -171,7 +178,7 @@ function validateQuantity() {
 }
 
 // 添加/编辑持仓
-function savePosition() {
+async function savePosition() {
   // 验证
   if (!formData.value.ts_code) {
     alert('请输入股票代码')
@@ -186,21 +193,37 @@ function savePosition() {
     return
   }
   
-  const position: Position = {
+  const positionData = {
     ts_code: formData.value.ts_code.toUpperCase(),
     name: formData.value.name || formData.value.ts_code,
     quantity: formData.value.quantity,
     cost_price: formData.value.cost_price
   }
   
-  if (editingIndex.value !== null) {
-    portfolio.value.positions[editingIndex.value] = position
-  } else {
-    portfolio.value.positions.push(position)
+  try {
+    if (editingIndex.value !== null) {
+      const pos = portfolio.value.positions[editingIndex.value]
+      if (pos.id) {
+        await fetch(`/api/portfolio/${pos.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(positionData)
+        })
+      }
+    } else {
+      await fetch('/api/portfolio', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(positionData)
+      })
+    }
+    
+    await fetchPositions()
+    resetForm()
+  } catch (e) {
+    console.error('保存持仓失败', e)
+    alert('保存失败')
   }
-  
-  resetForm()
-  updateWeights()
 }
 
 // 编辑持仓
@@ -218,10 +241,19 @@ function editPosition(index: number) {
 }
 
 // 删除持仓
-function deletePosition(index: number) {
+// 删除持仓
+async function deletePosition(index: number) {
+  const pos = portfolio.value.positions[index]
+  if (!pos || !pos.id) return
+
   if (confirm('确定要删除这条持仓记录吗？')) {
-    portfolio.value.positions.splice(index, 1)
-    updateWeights()
+    try {
+      await fetch(`/api/portfolio/${pos.id}`, { method: 'DELETE' })
+      await fetchPositions()
+    } catch (e) {
+      console.error('删除失败', e)
+      alert('删除失败')
+    }
   }
 }
 

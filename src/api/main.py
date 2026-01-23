@@ -21,6 +21,16 @@ from src.config import LLMProvider, get_settings
 from src.core.alpha_predator import AlphaPredator
 from src.core.deep_dive import DeepDiveDiagnostic
 
+# Database
+from src.database import get_db, engine, Base
+from src.models import Position
+from sqlalchemy.orm import Session
+from fastapi import Depends
+from src import models
+
+# Create tables (moved to lifespan)
+# models.Base.metadata.create_all(bind=engine)
+
 
 # ==================== 请求/响应模型 ====================
 
@@ -66,6 +76,21 @@ class QuickScanResponse(BaseModel):
     signal: Optional[dict] = None
     technical: Optional[dict] = None
 
+class PortfolioItem(BaseModel):
+    id: Optional[int] = None
+    ts_code: str
+    name: str
+    quantity: int
+    cost_price: float
+    
+    class Config:
+        from_attributes = True
+
+class PortfolioRequest(BaseModel):
+    # Backward compatibility, but we prefer DB now
+    total_capital: float = 100000
+    positions: list[PortfolioItem] = []
+
 
 # ==================== 应用生命周期 ====================
 
@@ -74,9 +99,24 @@ async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     logger.info("QuantumAlpha API 启动中...")
     
+    # 初始化数据库
+    try:
+        models.Base.metadata.create_all(bind=engine)
+        logger.info("数据库初始化成功")
+    except Exception as e:
+        logger.error(f"数据库初始化失败: {e}")
+    
+    
     # 预加载组件
-    app.state.alpha_predator = AlphaPredator()
-    app.state.deep_dive = DeepDiveDiagnostic()
+    try:
+        app.state.alpha_predator = AlphaPredator()
+        app.state.deep_dive = DeepDiveDiagnostic()
+        logger.info("组件加载成功")
+    except Exception as e:
+        logger.error(f"组件加载失败: {e}")
+        # Initialize placeholders to prevent 500s on access attempt (optional, or let it fail later but knowing why)
+        app.state.alpha_predator = None
+        app.state.deep_dive = None
     
     logger.info("QuantumAlpha API 启动完成")
     yield
@@ -808,8 +848,64 @@ async def analyze_portfolio():
     }
 
 
+
+# ==================== 持仓管理 API ====================
+
+@app.get("/api/portfolio", tags=["持仓管理"])
+def get_portfolio(db: Session = Depends(get_db)):
+    """获取所有持仓"""
+    positions = db.query(Position).all()
+    return positions
+
+@app.post("/api/portfolio", tags=["持仓管理"])
+def add_position(item: PortfolioItem, db: Session = Depends(get_db)):
+    """添加持仓"""
+    # Simply add new position (allow duplicates as user requested manual merge logic later, 
+    # but actually user said 'merge duplicate stocks' during diagnosis. So storage can contain duplicates?
+    # Usually better to merge on storage or keep separate lots. 
+    # Let's keep separate lots as user said 'same stock... inconsistent cost/quantity needs weighted average'.
+    # This implies we store them separately and merge on analysis.
+    db_pos = Position(
+        ts_code=item.ts_code,
+        name=item.name,
+        quantity=item.quantity,
+        cost_price=item.cost_price
+    )
+    db.add(db_pos)
+    db.commit()
+    db.refresh(db_pos)
+    return db_pos
+
+@app.put("/api/portfolio/{pos_id}", tags=["持仓管理"])
+def update_position(pos_id: int, item: PortfolioItem, db: Session = Depends(get_db)):
+    """更新持仓"""
+    db_pos = db.query(Position).filter(Position.id == pos_id).first()
+    if not db_pos:
+        raise HTTPException(status_code=404, detail="持仓不存在")
+    
+    db_pos.ts_code = item.ts_code
+    db_pos.name = item.name
+    db_pos.quantity = item.quantity
+    db_pos.cost_price = item.cost_price
+    
+    db.commit()
+    db.refresh(db_pos)
+    return db_pos
+
+@app.delete("/api/portfolio/{pos_id}", tags=["持仓管理"])
+def delete_position(pos_id: int, db: Session = Depends(get_db)):
+    """删除持仓"""
+    db_pos = db.query(Position).filter(Position.id == pos_id).first()
+    if not db_pos:
+        raise HTTPException(status_code=404, detail="持仓不存在")
+    
+    db.delete(db_pos)
+    db.commit()
+    return {"success": True}
+
+
 @app.post("/api/user/portfolio/diagnose", tags=["用户"])
-async def diagnose_portfolio(request: PortfolioRequest):
+async def diagnose_portfolio(request: PortfolioRequest, db: Session = Depends(get_db)):
     """诊断持仓股票
     
     对用户持仓的每只股票进行深度诊断，给出买入/持有/卖出建议。
@@ -828,12 +924,58 @@ async def diagnose_portfolio(request: PortfolioRequest):
     try:
         llm = get_default_llm()
         
+        # 1. 获取持仓数据 (优先使用数据库)
+        db_positions = db.query(Position).all()
+        
+        # 合并持仓逻辑 (Weighted Average)
+        merged_positions = {}
+        for pos in db_positions:
+            if pos.ts_code not in merged_positions:
+                merged_positions[pos.ts_code] = {
+                    "ts_code": pos.ts_code,
+                    "name": pos.name,
+                    "quantity": 0,
+                    "total_cost": 0.0,
+                    "avg_cost": 0.0
+                }
+            
+            p = merged_positions[pos.ts_code]
+            p["quantity"] += pos.quantity
+            p["total_cost"] += pos.quantity * pos.cost_price
+        
+        # Calculate average cost
+        final_positions = []
+        for code, p in merged_positions.items():
+            if p["quantity"] > 0:
+                p["avg_cost"] = p["total_cost"] / p["quantity"]
+                final_positions.append(p)
+        
+        # Use request positions if DB is empty
+        target_positions = final_positions
+        
+        if not target_positions and request.positions:
+            # Convert Pydantic models to dict format matching final_positions structure
+            for p in request.positions:
+                target_positions.append({
+                    "ts_code": p.ts_code,
+                    "name": p.name,
+                    "quantity": p.quantity,
+                    "avg_cost": p.cost_price, # Map cost_price to avg_cost
+                    "total_cost": p.quantity * p.cost_price
+                })
+        
+        if not target_positions:
+             return {
+                "success": False,
+                "error": "暂无持仓数据",
+            }
+
         # 采集每只持仓股的数据
         deep_dive: DeepDiveDiagnostic = app.state.deep_dive
         
         stock_data_list = []
-        for pos in request.positions:
-            ts_code = normalize_stock_code(pos.ts_code)
+        for pos in target_positions:
+            ts_code = normalize_stock_code(pos["ts_code"])
             stock_info = await deep_dive.get_stock_info(ts_code)
             stock_data = await deep_dive.collect_stock_data(ts_code)
             
@@ -846,17 +988,26 @@ async def diagnose_portfolio(request: PortfolioRequest):
             
             stock_data_list.append({
                 "ts_code": ts_code,
-                "name": stock_info.name if stock_info else pos.name,
-                "quantity": pos.quantity,
-                "cost_price": pos.cost_price,
+                "name": stock_info.name if stock_info else pos["name"],
+                "quantity": pos["quantity"],
+                "cost_price": pos["avg_cost"],
                 "current_price": current_price,
                 "fundamental": fundamental,
                 "technical": technical,
             })
         
-        # 计算可用资金
-        total_market_value = sum(p.quantity * p.cost_price for p in request.positions)
-        available_capital = request.total_capital - total_market_value
+        # 计算可用资金 (Assuming total capital from request is still valid or needs storage?
+        # User didn't ask to store total capital, but usually it goes with portfolio. 
+        # For now, keep using request.total_capital)
+        total_market_value = sum(p["quantity"] * p["avg_cost"] for p in target_positions) # Using cost value for calculation base? No, market value is current.
+        # Wait, total_market_value should be current value.
+        current_market_value = sum(s["quantity"] * s["current_price"] for s in stock_data_list)
+        
+        # Calculate available capital based on input total - cost? Or total assets?
+        # Usually: Available = Total Assets (Input) - Market Value (Positions)? 
+        # Or Total Capital = Cash + Market Value.
+        # Let's assume request.total_capital is Total Assets.
+        available_capital = request.total_capital - current_market_value
         
         # 构建持仓数据字符串
         positions_str = ""

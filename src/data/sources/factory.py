@@ -225,13 +225,31 @@ class UnifiedDataSource:
         if self.is_akshare:
             return self._akshare.get_index_spot()
         else:
-            # 对于 Tushare，获取最新一天的指数数据
-            today = self.get_today_str()
-            return self._tushare.get_index_daily(
-                ts_code="000001.SH",
-                start_date=today,
-                end_date=today,
-            )
+            # 对于 Tushare，使用 get_realtime_quotes 获取主要指数
+            # Sina codes: sh=000001, sz=399001, cyb=399006, sz50=000016, sz180=000010, kc50=000688
+            codes = ['sh', '399001', '399006', '000016', '000010', '000688']
+            try:
+                df = self._tushare.get_realtime_quotes(codes)
+                if not df.empty:
+                    # Calculate pct_chg
+                    df['price'] = pd.to_numeric(df['price'])
+                    df['pre_close'] = pd.to_numeric(df['pre_close'])
+                    df['pct_chg'] = ((df['price'] - df['pre_close']) / df['pre_close'] * 100).round(2)
+                    
+                    # Rename to match AkShare/Main expectation
+                    df = df.rename(columns={
+                        'code': '代码',
+                        'name': '名称',
+                        'price': '最新价',
+                        'pct_chg': '涨跌幅',
+                        'volume': '成交量',
+                        'amount': '成交额'
+                    })
+                    return df
+            except Exception as e:
+                logger.error(f"Tushare 获取指数行情失败: {e}")
+            
+            return pd.DataFrame()
     
     def get_north_flow(self, trade_date: Optional[str] = None) -> dict:
         """获取北向资金数据"""

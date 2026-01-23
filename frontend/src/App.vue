@@ -29,7 +29,12 @@ async function loadProviderInfo() {
 
 async function checkHealth() {
   try {
-    const response = await fetch('/health')
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 5000) // 5s timeout
+
+    const response = await fetch('/health', { signal: controller.signal })
+    clearTimeout(timeoutId)
+    
     if (response.ok) {
       apiStatus.value = 'connected'
       // 健康检查通过后加载提供商信息
@@ -37,7 +42,8 @@ async function checkHealth() {
     } else {
       apiStatus.value = 'error'
     }
-  } catch {
+  } catch (e) {
+    console.warn('Health check failed:', e)
     apiStatus.value = 'error'
   }
 }

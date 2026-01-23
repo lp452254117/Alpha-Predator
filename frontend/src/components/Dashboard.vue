@@ -1088,8 +1088,8 @@ function formatMarkdown(text: string): string {
   font-weight: 600;
 }
 
-.market-value.up { color: var(--buy-color); }
-.market-value.down { color: var(--sell-color); }
+.market-value.down { color: var(--buy-color); }
+.market-value.up { color: var(--sell-color); }
 
 .market-change {
   font-size: 13px;
@@ -1099,13 +1099,13 @@ function formatMarkdown(text: string): string {
 }
 
 .market-change.up {
-  background: rgba(16, 185, 129, 0.15);
-  color: var(--buy-color);
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--sell-color);
 }
 
 .market-change.down {
-  background: rgba(239, 68, 68, 0.15);
-  color: var(--sell-color);
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--buy-color);
 }
 
 .tips-list {
@@ -1322,5 +1322,13 @@ function formatMarkdown(text: string): string {
   opacity: 0.6;
   cursor: not-allowed;
   transform: none;
+}
+
+.up {
+  color: #ef4444;
+}
+
+.down {
+  color: #22c55e;
 }
 </style>

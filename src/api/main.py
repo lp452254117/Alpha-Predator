@@ -911,11 +911,10 @@ async def diagnose_portfolio(request: PortfolioRequest, db: Session = Depends(ge
     对用户持仓的每只股票进行深度诊断，给出买入/持有/卖出建议。
     适合每日开盘前使用。
     """
+
     if not request.positions:
-        return {
-            "success": False,
-            "error": "暂无持仓数据",
-        }
+        # Don't return error yet, check DB first
+        pass
     
     from src.ai.llm import get_default_llm, LLMMessage
     from src.ai.llm.base import MessageRole

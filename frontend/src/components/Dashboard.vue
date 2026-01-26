@@ -598,6 +598,8 @@ function formatMarkdown(text: string): string {
 
 <style scoped>
 .dashboard {
+  --buy-color: #22c55e;
+  --sell-color: #ef4444;
   display: grid;
   grid-template-columns: 280px 1fr 300px;
   gap: 24px;
@@ -1325,10 +1327,12 @@ function formatMarkdown(text: string): string {
 }
 
 .up {
-  color: #ef4444;
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--sell-color);
 }
 
 .down {
-  color: #22c55e;
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--buy-color);
 }
 </style>

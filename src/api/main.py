@@ -1091,3 +1091,35 @@ async def diagnose_portfolio(request: PortfolioRequest, db: Session = Depends(ge
             "success": False,
             "error": str(e),
         }
+
+
+# ==================== 导出代理 (绕过浏览器插件限制) ====================
+
+import os
+import uuid
+from fastapi import File, UploadFile
+from fastapi.responses import FileResponse
+
+TEMP_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "temp_exports")
+os.makedirs(TEMP_DIR, exist_ok=True)
+
+@app.post("/api/export/upload", tags=["导出"])
+async def upload_export_file(file: UploadFile = File(...)):
+    """接收前端生成的 PDF/文件，保存临时文件，返回下载链接"""
+    filename = f"{uuid.uuid4()}_{file.filename}"
+    filepath = os.path.join(TEMP_DIR, filename)
+    
+    with open(filepath, "wb") as f:
+        content = await file.read()
+        f.write(content)
+        
+    return {"url": f"/api/export/download/{filename}"}
+
+@app.get("/api/export/download/{filename}", tags=["导出"])
+async def download_export_file(filename: str):
+    """提供真实文件下载"""
+    filepath = os.path.join(TEMP_DIR, filename)
+    if not os.path.exists(filepath):
+        raise HTTPException(status_code=404, detail="文件已过期或不存在")
+        
+    return FileResponse(filepath, filename=filename.split('_', 1)[1] if '_' in filename else filename)

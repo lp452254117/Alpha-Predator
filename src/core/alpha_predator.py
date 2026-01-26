@@ -670,7 +670,10 @@ Shibor 利率:
             "conservative": "【保守型】用户偏好低风险稳健收益，推荐蓝筹股、高股息标的，仓位建议偏低。",
         }
         risk_hint = risk_prompts.get(risk_preference, risk_prompts["balanced"])
-        
+        logger.info(f"日期: {trade_date}")
+        logger.info(f"实时行情: {stock_quotes}")
+        logger.info(f"资金流向: {stock_money_flow}")
+        logger.info(f"技术指标: {stock_technicals}")
         # 渲染 Prompt
         prompt = render_prompt(
             STOCK_RECOMMENDATION_TEMPLATE,

@@ -260,6 +260,7 @@ async function runDiagnose() {
 
 // @ts-ignore
 import html2pdf from 'html2pdf.js'
+
 // 格式化 Markdown（使用 marked 库正确渲染表格）
 import { marked } from 'marked'
 
@@ -280,19 +281,47 @@ async function exportToPdf() {
     const element = document.querySelector('.diagnose-result')
     if (!element) return
 
+    const dateStr = new Date().toISOString().split('T')[0]
     const opt = {
       margin:       10,
-      filename:     `${diagnoseResult.value.stock.name}_${diagnoseResult.value.stock.ts_code}_诊断报告.pdf`,
-      image:        { type: 'jpeg', quality: 0.98 },
-      html2canvas:  { scale: 2, useCORS: true },
-      jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+      filename:     `${diagnoseResult.value.stock.name}_${diagnoseResult.value.stock.ts_code}_诊断报告_${dateStr}.pdf`,
+      image:        { type: 'jpeg', quality: 0.95 },
+      html2canvas:  { 
+        scale: 1.3,       // Lower scale to save memory
+        useCORS: true, 
+        scrollY: 0, 
+        logging: false,
+        windowWidth: 800  // Force width to prevent horizontal overflow issues
+      },
+      jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' },
+      pagebreak:    { mode: ['avoid-all', 'css', 'legacy'] } // Prevent infinite loops in layout calculation
     }
 
+    // Generate Blob
     // @ts-ignore
-    await html2pdf().from(element).set(opt).save()
+    const pdfBlob = await html2pdf().from(element).set(opt).output('blob')
+    
+    // Create FormData
+    const formData = new FormData()
+    formData.append('file', pdfBlob, opt.filename)
+    
+    // Upload to Backend Proxy
+    const uploadRes = await fetch('/api/export/upload', {
+      method: 'POST',
+      body: formData
+    })
+    
+    const data = await uploadRes.json()
+    if (data.url) {
+      // Trigger Real Download (Bypasses Extension Issues with Blob)
+      window.location.href = data.url
+    } else {
+      throw new Error('Server returned no download URL')
+    }
+
   } catch (e) {
     console.error('导出失败', e)
-    showError('error', '导出失败', '生成 PDF 时发生错误')
+    showError('error', '导出失败', '生成 PDF 时发生错误 (后端代理失败)')
   } finally {
     isExporting.value = false
   }
@@ -1334,5 +1363,29 @@ function formatMarkdown(text: string): string {
 .down {
   background: rgba(16, 185, 129, 0.15);
   color: var(--buy-color);
+}
+
+@media print {
+  .sidebar, .info-panel, .panel-header, .diagnose-input, .alert, .nav-menu {
+    display: none !important;
+  }
+  
+  .dashboard {
+    display: block !important;
+    min-height: auto !important;
+  }
+  
+  .panel {
+    border: none !important;
+    padding: 0 !important;
+  }
+  
+  .diagnose-result {
+    width: 100% !important;
+  }
+  
+  body {
+    background: white !important;
+  }
 }
 </style>

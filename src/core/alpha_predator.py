@@ -457,13 +457,20 @@ Shibor 利率:
             
             # 3. 获取概念板块 (仅 AkShare 支持)
             if ths:
-                try:
-                    concept_df = ths.ak.stock_board_concept_name_em()
-                    if concept_df is not None and not concept_df.empty:
-                        concept_data = concept_df.head(15).to_string(index=False)
-                        logger.info(f"获取概念板块: {len(concept_df)} 个")
-                except Exception as e:
-                    logger.warning(f"获取概念板块失败: {e}")
+                for attempt in range(3):
+                    try:
+                        concept_df = ths.ak.stock_board_concept_name_em()
+                        if concept_df is not None and not concept_df.empty:
+                            concept_data = concept_df.head(15).to_string(index=False)
+                            logger.info(f"获取概念板块: {len(concept_df)} 个")
+                            break
+                    except Exception as e:
+                        if attempt == 2:
+                            logger.warning(f"获取概念板块失败 (重试3次): {e}")
+                        else:
+                            import time
+                            time.sleep(1)
+            
             
             # 4. 获取指数数据 (UnifiedDataSource 处理)
             index_df = self.data_source.get_index_spot()

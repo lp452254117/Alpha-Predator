@@ -247,7 +247,6 @@ function editPosition(index: number) {
 }
 
 // 删除持仓
-// 删除持仓
 async function deletePosition(index: number) {
   const pos = portfolio.value.positions[index]
   if (!pos || !pos.id) return

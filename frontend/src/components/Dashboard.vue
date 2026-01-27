@@ -274,57 +274,117 @@ marked.setOptions({
 const isExporting = ref(false)
 
 async function exportToPdf() {
-  if (!diagnoseResult.value) return
-  
-  isExporting.value = true
-  try {
+    if (!diagnoseResult.value) return
+    
+    // 获取要导出的元素
     const element = document.querySelector('.diagnose-result')
     if (!element) return
+
+    isExporting.value = true
+
+    // 1. 克隆元素：创建一个与当前页面环境隔离的副本
+    // @ts-ignore
+    const clone = element.cloneNode(true) as HTMLElement
+    
+    // 2. 创建一个临时的容器，放在屏幕可视区域之外，但对 html2canvas 可见
+    const container = document.createElement('div')
+    container.style.position = 'absolute'
+    container.style.top = '-9999px'
+    container.style.left = '0'
+    container.style.width = '800px' // 锁定宽度，模拟 A4
+    container.style.zIndex = '10000'
+    container.style.backgroundColor = '#ffffff'
+    container.style.color = '#000000'
+    container.className = 'pdf-export-container' // 用于挂载特定样式
+    
+    container.appendChild(clone)
+    document.body.appendChild(container)
+    
+    // 3. 强制在克隆体上应用样式修改 (智能重置)
+    const allElements = container.querySelectorAll('*')
+    allElements.forEach((el: any) => {
+        // 基础重置：文字变黑，移除阴影
+        el.style.color = '#000000';
+        el.style.textShadow = 'none';
+        el.style.boxShadow = 'none';
+        el.style.opacity = '1';
+        
+        // 针对不同元素类型的特殊处理
+        const tagName = el.tagName.toLowerCase();
+        
+        if (tagName === 'table') {
+            el.style.borderCollapse = 'collapse';
+            el.style.width = '100%';
+            el.style.marginBottom = '10px';
+        } else if (tagName === 'th') {
+            el.style.border = '1px solid #333'; // 加深边框
+            el.style.background = '#f3f4f6';    // 浅灰背景
+            el.style.padding = '8px';
+            el.style.fontWeight = 'bold';
+        } else if (tagName === 'td') {
+            el.style.border = '1px solid #999'; // 普通边框
+            el.style.padding = '8px';
+            el.style.background = '#ffffff';
+        } else if (tagName === 'pre' || tagName === 'code') {
+            el.style.background = '#f8fafc';
+            el.style.border = '1px solid #e2e8f0';
+            el.style.fontFamily = 'monospace';
+        } else if (el.classList.contains('badge') || el.classList.contains('signal-badge')) {
+            // 徽章保留原有背景色，但增加边框以防背景太浅看不清
+            el.style.border = '1px solid #000'; 
+            el.style.fontWeight = 'bold';
+            // 不强制覆盖徽章的 background，让它保留原色 (或者手动映射颜色)
+        } else {
+            // 其他普通容器，背景透明
+            el.style.background = 'transparent';
+        }
+    })
 
     const dateStr = new Date().toISOString().split('T')[0]
     const opt = {
       margin:       10,
       filename:     `${diagnoseResult.value.stock.name}_${diagnoseResult.value.stock.ts_code}_诊断报告_${dateStr}.pdf`,
-      image:        { type: 'jpeg', quality: 0.95 },
+      image:        { type: 'jpeg', quality: 0.98 },
       html2canvas:  { 
-        scale: 1.3,       // Lower scale to save memory
+        scale: 2,         // 提高清晰度
         useCORS: true, 
         scrollY: 0, 
         logging: false,
-        windowWidth: 800  // Force width to prevent horizontal overflow issues
+        backgroundColor: '#ffffff'
       },
       jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' },
-      pagebreak:    { mode: ['avoid-all', 'css', 'legacy'] } // Prevent infinite loops in layout calculation
+      pagebreak:    { mode: ['avoid-all', 'css', 'legacy'] } 
     }
 
-    // Generate Blob
-    // @ts-ignore
-    const pdfBlob = await html2pdf().from(element).set(opt).output('blob')
-    
-    // Create FormData
-    const formData = new FormData()
-    formData.append('file', pdfBlob, opt.filename)
-    
-    // Upload to Backend Proxy
-    const uploadRes = await fetch('/api/export/upload', {
-      method: 'POST',
-      body: formData
-    })
-    
-    const data = await uploadRes.json()
-    if (data.url) {
-      // Trigger Real Download (Bypasses Extension Issues with Blob)
-      window.location.href = data.url
-    } else {
-      throw new Error('Server returned no download URL')
+    try {
+        // Generate Blob from CLONE
+        // @ts-ignore
+        const pdfBlob = await html2pdf().from(clone).set(opt).output('blob')
+        
+        // Create FormData
+        const formData = new FormData()
+        formData.append('file', pdfBlob, opt.filename)
+        
+        // Upload to Backend Proxy
+        const uploadRes = await fetch('/api/export/upload', {
+          method: 'POST',
+          body: formData
+        })
+        
+        const data = await uploadRes.json()
+        if (data.url) {
+          window.location.href = data.url
+        } else {
+          throw new Error('Server returned no download URL')
+        }
+    } catch (e) {
+        console.error('导出失败', e)
+        showError('error', '导出失败', '生成 PDF 时发生错误 (后端代理失败)')
+    } finally {
+        // 移除临时容器
+        document.body.removeChild(container)
+        isExporting.value = false
     }
-
-  } catch (e) {
-    console.error('导出失败', e)
-    showError('error', '导出失败', '生成 PDF 时发生错误 (后端代理失败)')
-  } finally {
-    isExporting.value = false
-  }
 }
 
 // 格式化大数字
@@ -1387,5 +1447,85 @@ function formatMarkdown(text: string): string {
   body {
     background: white !important;
   }
+}
+
+
+/* PDF 导出修复样式 - 专业白底文档模式 */
+:deep(.pdf-fix.diagnose-result) {
+  background-color: #ffffff !important;
+  color: #1a1a1a !important;
+  padding: 20px !important; 
+  border: 1px solid #e5e7eb !important;
+  opacity: 1 !important; /* 防止透明度导致的白膜 */
+  position: static !important; /* 防止定位导致的层级问题 */
+  z-index: 9999 !important;
+}
+
+/* 强制所有文本颜色为深色，且移除透明度 */
+.pdf-fix h1, .pdf-fix h2, .pdf-fix h3, .pdf-fix h4, 
+.pdf-fix p, .pdf-fix li, .pdf-fix span, .pdf-fix strong, .pdf-fix div, .pdf-fix * {
+  color: #1a1a1a !important;
+  text-shadow: none !important;
+  -webkit-text-fill-color: #1a1a1a !important;
+  opacity: 1 !important; /* 关键修复：移除所有透明度 */
+  backdrop-filter: none !important; /* 关键修复：移除毛玻璃 */
+}
+
+/* 表格样式优化 */
+.pdf-fix table {
+  background-color: transparent !important;
+  border-collapse: collapse !important;
+  width: 100% !important;
+  margin: 10px 0 !important;
+}
+
+.pdf-fix th {
+  background-color: #f3f4f6 !important; /* 浅灰表头 */
+  color: #111827 !important;
+  border: 1px solid #d1d5db !important;
+  font-weight: 600 !important;
+}
+
+.pdf-fix td {
+  background-color: #ffffff !important;
+  color: #374151 !important;
+  border: 1px solid #d1d5db !important;
+}
+
+/* 信号标签 - 保持彩色但加深对比度 */
+.pdf-fix .signal-badge {
+  background: #f3f4f6 !important;
+  color: #1f2937 !important;
+  border: 1px solid #9ca3af !important;
+}
+
+.pdf-fix .signal-buy {
+  background-color: #dcfce7 !important;
+  color: #166534 !important;
+  border-color: #166534 !important;
+}
+
+.pdf-fix .signal-sell {
+  background-color: #fee2e2 !important;
+  color: #991b1b !important;
+  border-color: #991b1b !important;
+}
+
+.pdf-fix .signal-hold {
+  background-color: #fef3c7 !important;
+  color: #92400e !important;
+  border-color: #92400e !important;
+}
+
+/* 代码块 */
+.pdf-fix pre, .pdf-fix code {
+  background-color: #f8fafc !important;
+  color: #334155 !important;
+  border: 1px solid #cbd5e1 !important;
+}
+
+/* 移除修饰元素 */
+.pdf-fix .loading-spinner, .pdf-fix .loading-spinner-small {
+  display: none !important;
 }
 </style>

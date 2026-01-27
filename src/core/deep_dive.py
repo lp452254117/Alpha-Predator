@@ -212,11 +212,25 @@ class DeepDiveDiagnostic:
                 if data["daily"] is not None and not data["daily"].empty:
                     df = data["daily"]
                     try:
+                        # 尝试获取实时行情以覆盖收盘价
+                        current_price = None
+                        try:
+                            rt_quote = self.data_source.get_realtime_quote(ts_code)
+                            if rt_quote and 'price' in rt_quote:
+                                current_price = float(rt_quote['price'])
+                                logger.info(f"使用实时行情价格: {current_price}")
+                        except Exception as e:
+                            logger.warning(f"获取实时价格失败: {e}")
+
+                        # 如果获取不到实时价，使用最近日线收盘价
+                        if current_price is None or current_price == 0:
+                            current_price = df["close"].iloc[-1] if "close" in df.columns and len(df) > 0 else None
+
                         data["price_stats"] = {
                             "high_52w": df["high"].max() if "high" in df.columns else None,
                             "low_52w": df["low"].min() if "low" in df.columns else None,
                             "avg_volume": df["vol"].mean() if "vol" in df.columns else None,
-                            "current_close": df["close"].iloc[-1] if "close" in df.columns and len(df) > 0 else None,
+                            "current_close": current_price,
                         }
                     except Exception as e:
                         logger.warning(f"计算价格统计失败: {e}")
@@ -243,9 +257,17 @@ class DeepDiveDiagnostic:
                     stock_list = self.data_source.get_stock_list()
                     stock_row = stock_list[stock_list['ts_code'] == ts_code]
                     if not stock_row.empty:
-                         data["industry_info"] = stock_row.iloc[0].to_dict()
+                        data["industry_info"] = stock_row.iloc[0].to_dict()
                 except Exception as e:
-                     logger.warning(f"获取行业信息失败: {e}")
+                    logger.warning(f"获取行业信息失败: {e}")
+
+                # 7. 十大股东
+                try:
+                    holders = self.data_source._tushare.get_top10_holders(ts_code=ts_code)
+                    if holders is not None and not holders.empty:
+                        data["holders"] = holders.head(10)
+                except Exception as e:
+                    logger.warning(f"获取十大股东失败: {e}")
             elif self.data_source.is_akshare:
                 stock_code = ts_code.split(".")[0]
                 market = "sz" if ts_code.endswith(".SZ") else "sh"
@@ -465,6 +487,34 @@ class DeepDiveDiagnostic:
             else:
                 result.append(announcements.to_markdown(index=False))
         
+        # 十大股东
+        holders = data.get("holders")
+        if holders is not None and not holders.empty:
+            result.append("\n### 十大股东")
+            try:
+                df_h = holders.copy()
+                # 简单列名映射
+                col_map = {
+                    'end_date': '报告期',
+                    'holder_name': '股东名称',
+                    'hold_amount': '持股数',
+                    'hold_ratio': '占比%'
+                }
+                df_display = df_h.rename(columns=col_map)
+                
+                # 格式化日期
+                if '报告期' in df_display.columns:
+                    df_display['报告期'] = df_display['报告期'].astype(str)
+                    
+                # 格式化持股数 (转为万股)
+                if '持股数' in df_display.columns:
+                     df_display['持股数'] = df_display['持股数'].apply(lambda x: f"{float(x)/10000:.2f}万" if x is not None else "N/A")
+
+                cols = [c for c in ['报告期', '股东名称', '持股数', '占比%'] if c in df_display.columns]
+                result.append(df_display[cols].head(10).to_markdown(index=False))
+            except Exception as e:
+                logger.warning(f"格式化股东数据失败: {e}")
+
         # 行业信息
         industry_info = data.get("industry_info")
         if industry_info:

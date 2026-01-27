@@ -298,6 +298,22 @@ class UnifiedDataSource:
                 logger.error(f"获取 Shibor 失败: {e}")
         # AkShare 暂不支持 Shibor
         return {}
+
+    def get_top10_holders(
+        self,
+        ts_code: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None
+    ) -> pd.DataFrame:
+        """获取前十大股东"""
+        if self.is_tushare:
+            return self._tushare.get_top10_holders(
+                ts_code=ts_code,
+                start_date=start_date,
+                end_date=end_date
+            )
+        # AkShare fallback (TODO: implement stock_individual_fund_flow equivalent?)
+        return pd.DataFrame()
     
     def get_sector_flow(self) -> pd.DataFrame:
         """获取板块资金流向"""

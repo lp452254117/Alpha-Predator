@@ -468,6 +468,37 @@ class TushareClient:
         df_res = pd.DataFrame(events)
         return df_res.sort_values('ann_date', ascending=False)
 
+    def get_top10_holders(
+        self,
+        ts_code: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None
+    ) -> pd.DataFrame:
+        """获取前十大股东
+        
+        Args:
+            ts_code: 股票代码
+            start_date: 开始日期 (YYYYMMDD)
+            end_date: 结束日期 (YYYYMMDD)
+            
+        Returns:
+            前十大股东 DataFrame
+        """
+        try:
+            # 如果未指定日期，默认查询最近一个报告期
+            # Tushare top10_holders 接口可以直接传 ts_code 获取所有历史，按日期降序
+            # 我们可以获取最近的
+            df = self.pro.top10_holders(
+                ts_code=ts_code,
+                start_date=start_date,
+                end_date=end_date
+            )
+            logger.debug(f"获取前十大股东: {ts_code}, 记录数: {len(df)}")
+            return df
+        except Exception as e:
+            logger.error(f"获取前十大股东失败: {e}")
+            return pd.DataFrame()
+
 
 # 全局客户端单例
 _client: Optional[TushareClient] = None

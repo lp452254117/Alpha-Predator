@@ -238,6 +238,12 @@ function editPosition(index: number) {
   }
   editingIndex.value = index
   isEditing.value = true
+  
+  // 滚动到表单区域，方便用户编辑
+  const formEntry = document.querySelector('.add-form')
+  if (formEntry) {
+    formEntry.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
 }
 
 // 删除持仓

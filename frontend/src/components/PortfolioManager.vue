@@ -5,6 +5,7 @@
  */
 import { ref, computed, onMounted, watch } from 'vue'
 import { marked } from 'marked'
+import html2pdf from 'html2pdf.js'
 
 interface Position {
   id?: number
@@ -324,32 +325,120 @@ async function diagnosePortfolio() {
   }
 }
 
-// 导出诊断报告
-function exportDiagnosis() {
-  if (!diagnosisRaw.value) {
+const isExporting = ref(false)
+
+// 导出诊断报告 (PDF)
+async function exportDiagnosis() {
+  if (!diagnosisResult.value) {
     alert('暂无诊断报告可导出，请先进行诊断')
     return
   }
   
+  // 获取要导出的元素
+  const element = document.querySelector('.diagnosis-content')
+  if (!element) return
+
+  isExporting.value = true
+
+  // 1. 克隆元素
+  // @ts-ignore
+  const clone = element.cloneNode(true) as HTMLElement
+  
+  // 2. 创建临时容器
+  const container = document.createElement('div')
+  container.style.position = 'absolute'
+  container.style.top = '-9999px'
+  container.style.left = '0'
+  container.style.width = '800px'
+  container.style.zIndex = '10000'
+  container.style.backgroundColor = '#ffffff'
+  container.style.color = '#000000'
+  container.className = 'pdf-export-container'
+  
+  container.appendChild(clone)
+  
+  // 核心修复：移除滚动限制，强制展开所有内容
+  clone.style.maxHeight = 'none'
+  clone.style.overflow = 'visible'
+  clone.style.height = 'auto'
+
+  document.body.appendChild(container)
+  
+  // 3. 样式重置 (参考 Dashboard.vue)
+  const allElements = container.querySelectorAll('*')
+  allElements.forEach((el: any) => {
+      el.style.color = '#000000';
+      el.style.textShadow = 'none';
+      el.style.boxShadow = 'none';
+      el.style.opacity = '1';
+      
+      const tagName = el.tagName.toLowerCase();
+      
+      if (tagName === 'table') {
+          el.style.borderCollapse = 'collapse';
+          el.style.width = '100%';
+          el.style.marginBottom = '10px';
+      } else if (tagName === 'th') {
+          el.style.border = '1px solid #333';
+          el.style.background = '#f3f4f6';
+          el.style.padding = '8px';
+          el.style.fontWeight = 'bold';
+      } else if (tagName === 'td') {
+          el.style.border = '1px solid #999';
+          el.style.padding = '8px';
+          el.style.background = '#ffffff';
+      } else if (tagName === 'pre' || tagName === 'code') {
+          el.style.background = '#f8fafc';
+          el.style.border = '1px solid #e2e8f0';
+          el.style.fontFamily = 'monospace';
+      } else {
+          el.style.background = 'transparent';
+      }
+  })
+
+  // 文件名：持仓诊断报告_YYYY-MM-DD.pdf
+  const dateStr = new Date().toISOString().split('T')[0]
+  const filename = `持仓诊断报告_${dateStr}.pdf`
+  
+  const opt = {
+    margin:       10,
+    filename:     filename,
+    image:        { type: 'jpeg', quality: 0.98 },
+    html2canvas:  { 
+      scale: 2,
+      useCORS: true, 
+      scrollY: 0, 
+      logging: false,
+      backgroundColor: '#ffffff'
+    },
+    jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' },
+    pagebreak:    { mode: ['avoid-all', 'css', 'legacy'] } 
+  }
+
   try {
-    const blob = new Blob([diagnosisRaw.value], { type: 'text/markdown;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    
-    // 使用本地日期格式 YYYY-MM-DD
-    const now = new Date()
-    const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
-    
-    console.log('Generated filename date:', date) // Debug log
-    a.download = `持仓诊断报告_${date}.md`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
+      // @ts-ignore
+      const pdfBlob = await html2pdf().from(clone).set(opt).output('blob')
+      
+      const formData = new FormData()
+      formData.append('file', pdfBlob, opt.filename)
+      
+      const uploadRes = await fetch('/api/export/upload', {
+        method: 'POST',
+        body: formData
+      })
+      
+      const data = await uploadRes.json()
+      if (data.url) {
+        window.location.href = data.url
+      } else {
+        throw new Error('Server returned no download URL')
+      }
   } catch (e) {
-    console.error('导出失败', e)
-    alert('导出失败，请重试')
+      console.error('导出失败', e)
+      alert('导出失败: ' + e)
+  } finally {
+      document.body.removeChild(container)
+      isExporting.value = false
   }
 }
 </script>
@@ -506,7 +595,9 @@ function exportDiagnosis() {
       <div class="diagnosis-header">
         <h3>🩺 持仓诊断报告</h3>
         <div class="header-actions">
-          <button class="btn btn-primary btn-sm" @click="exportDiagnosis">📥 导出报告</button>
+          <button class="btn btn-primary btn-sm" @click="exportDiagnosis" :disabled="isExporting">
+            {{ isExporting ? '生成PDF中...' : '📥 导出PDF报告' }}
+          </button>
           <button class="btn btn-secondary btn-sm" @click="diagnosisResult = null">关闭</button>
         </div>
       </div>
